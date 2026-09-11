@@ -48,6 +48,10 @@ gradlePlugin {
             id = "torfilx.android.room"
             implementationClass = "AndroidRoomConventionPlugin"
         }
+        register("libtorrentDesktop") {
+            id = "torfilx.libtorrent.desktop"
+            implementationClass = "LibtorrentDesktopConventionPlugin"
+        }
         register("jvmLibrary") {
             id = "torfilx.jvm.library"
             implementationClass = "JvmLibraryConventionPlugin"

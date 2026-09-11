@@ -174,12 +174,14 @@ private fun FilterBar(
         // list that will not scroll, and an old build still installed. One line settles all three —
         // the count says how much data actually loaded, and the version says whether the app running
         // is the one that was just installed. A debug-signed APK cannot upgrade in place and the
-        // debug variant installs under its own id, so having two builds side by side is easy.
+        // debug variant installs under its own id, so having two builds side by side is easy. Now that
+        // the catalogue updates on its own, its release number is on the same line for the same reason.
         if (!state.isLoading) {
             Text(
                 text = buildString {
                     append(if (state.cards.size == 1) "1 title" else "${state.cards.size} titles")
                     if (appVersion.isNotEmpty()) append(" · v").append(appVersion)
+                    if (state.catalogueVersion > 0) append(" · catalogue ").append(state.catalogueVersion)
                 },
                 style = MaterialTheme.typography.labelMedium,
                 color = TorfilxColors.TextSecondary,

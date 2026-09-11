@@ -1,8 +1,9 @@
 # TORFILX
 
-A Netflix-style Fire TV app whose entire library is a **bundled catalogue of public-domain films**, played over BitTorrent. There is no media server and no backend.
-played over BitTorrent. There is no media server and no backend: the app ships the catalogue, streams
-each title from its magnet link, and (with the viewer's consent) shares what it has downloaded.
+A Netflix-style Fire TV app whose library is a **signed catalogue of public-domain films**, played
+over BitTorrent. There is no media server and no backend: the app ships a catalogue, keeps it current
+from the peer network, streams each title from its magnet link, and (with the viewer's consent) shares
+what it has downloaded.
 
 ## What it does
 
@@ -16,6 +17,10 @@ each title from its magnet link, and (with the viewer's consent) shares what it 
 - **Storage budget**: never uses more than a configurable share of *free* space (default 50%, always
   keeping a 500 MB reserve), evicting oldest-touched titles first and never the one playing.
 - **Local watch state**: Continue Watching, resume positions and My List live in Room on the device.
+- **A catalogue that updates itself, without a server**: the maintainer signs a catalogue release and
+  publishes a pointer to it in the BitTorrent DHT; with sharing on, the app finds it, downloads it as a
+  small torrent, verifies every byte against the publisher key built into the APK, swaps it in while
+  running, and helps seed it. The bundled copy is the fallback. See `docs/CATALOGUE_P2P.md`.
 
 ## Requirements
 
@@ -157,11 +162,19 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 
 ## The catalogue
 
-`core/data/src/main/assets/catalog.json` is the single source of titles:
+A new install starts from `core/data/src/main/assets/catalog.json`, described by
+`catalog-manifest.json` beside it. From then on the app keeps the catalogue current from the peer
+network: the maintainer publishes signed releases with `tools/catalog-publisher`, and every release is
+verified against the publisher key built into the APK before it replaces anything. The format, the
+trust rules and the publishing runbook are in [`docs/CATALOGUE_P2P.md`](docs/CATALOGUE_P2P.md).
+
+Each entry looks like this. `id` is the key watch progress and My List are stored under; the
+publisher pins it once, so renaming a title never loses anyone's progress:
 
 ```json
 [
   {
+    "id": "catalog-the-kid-1921",
     "title": "The Kid",
     "year": "1921",
     "image_url": "https://…/poster.jpg",
@@ -184,8 +197,11 @@ player. Only content that may be freely redistributed belongs here — seeding *
 :core:model          domain types + pure rules (resume thresholds, source selection)
 :core:common         typed errors, dispatchers, clock, logging (with export buffer)
 :core:ui             theme, focus behaviour, cards/rows/hero/keyboard/consent dialog
-:core:data           catalogue loader, Room (progress, My List, search history), settings
+:core:data           catalogue in use + updater, Room (progress, My List, search history), settings
+:core:catalogue      pure JVM: catalogue release format, ids, Ed25519 verification, fetch sequence
+:core:catalogue-swarm pure JVM: DHT pointer, release torrents, DHT state (libtorrent, shared with the tool)
 :core:torrent        libtorrent4j engine, sequential streaming, loopback HTTP bridge, budget
+:tools:catalog-publisher  desktop CLI: keygen, pin, build, verify, publish, fetch
 :core:player         ExoPlayer factory, MediaSession service, playback state machine
 :feature:*           home, library, details, search, player, settings
 :core:testing        fixtures and fakes
@@ -204,7 +220,7 @@ player. Only content that may be freely redistributed belongs here — seeding *
 **This project is provided for personal and educational use.** It is a BitTorrent client with a TV
 interface: the application ships no media, hosts nothing, and operates no tracker or index service.
 Every title it shows comes from `core/data/src/main/assets/catalog.json`, which is supplied by
-whoever builds the app.
+whoever builds the app, or from a catalogue release signed with the publisher key that build trusts.
 
 The catalogue committed to this repository is intended to hold **public-domain films** — works whose
 copyright has expired and which may be freely copied and redistributed (for example Chaplin's *The
@@ -224,3 +240,6 @@ through the consent screen, and it can be turned off again at any time in Settin
 Whoever populates `catalog.json` and builds or distributes the resulting APK is responsible for
 ensuring they have the right to copy and redistribute those files. The maintainers of this codebase
 are not responsible for catalogues assembled by third parties.
+
+**Testing disclaimer:** This app is provided for testing and evaluation purposes only. It is not a
+production streaming service, and it may contain unfinished features, bugs, or experimental behavior.

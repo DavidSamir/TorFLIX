@@ -2,17 +2,27 @@ package com.torfilx.core.torrent
 
 import android.content.Context
 import android.os.StatFs
+import com.torfilx.core.catalogue.swarm.DhtStateStore
+import com.torfilx.core.catalogue.swarm.SessionShutdown
+import com.torfilx.core.catalogue.swarm.SwarmCatalogueTransport
+import com.torfilx.core.catalogue.swarm.SwarmLog
+import com.torfilx.core.catalogue.transport.CatalogueDownload
+import com.torfilx.core.catalogue.transport.CatalogueDownloadRequest
+import com.torfilx.core.catalogue.transport.CatalogueTransport
+import com.torfilx.core.catalogue.transport.PointerLookup
 import com.torfilx.core.common.di.ApplicationScope
 import com.torfilx.core.common.di.Dispatcher
 import com.torfilx.core.common.di.TorfilxDispatcher
 import com.torfilx.core.common.log.TorfilxLog
 import com.torfilx.core.model.CachedParts
+import com.torfilx.core.model.MagnetLink
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.isActive
@@ -41,6 +51,9 @@ private const val TAG = "Torrent"
  *
  * Sharing is deliberate: nothing is uploaded until [consentProvider] says the user opted in, and the
  * data kept for seeding never exceeds the space [storageBudget] allows.
+ *
+ * The same session also carries the catalogue: the DHT pointer to the latest signed release and the
+ * small release torrent itself ([CatalogueTransport]).
  */
 @Singleton
 class LibTorrentEngine @Inject constructor(
@@ -49,7 +62,7 @@ class LibTorrentEngine @Inject constructor(
     private val config: TorrentConfigProvider,
     @Dispatcher(TorfilxDispatcher.IO) private val ioDispatcher: CoroutineDispatcher,
     @ApplicationScope private val scope: CoroutineScope,
-) : TorrentEngine {
+) : TorrentEngine, CatalogueTransport {
 
     /**
      * Created on first use, never in the constructor.
@@ -65,6 +78,9 @@ class LibTorrentEngine @Inject constructor(
     private val session: SessionManager
         get() = runCatching { sessionRef }.getOrElse { throw TorrentError.EngineUnavailable(it) }
     private val sessionMutex = Mutex()
+
+    /** Bounds stop(): libtorrent's session destructor now and then never returns. */
+    private val sessionShutdown = SessionShutdown("TorfilxSessionStop")
     private val streamServer = TorrentStreamServer()
 
     /** Records network events so a failed play can explain itself on screen (see [diagnosticsText]). */
@@ -83,6 +99,34 @@ class LibTorrentEngine @Inject constructor(
     @Volatile
     private var started = false
 
+    private val _sessionRunning = MutableStateFlow(false)
+
+    /** True between a successful [start] and [stop]. The catalogue updater follows this. */
+    override val sessionRunning: StateFlow<Boolean> = _sessionRunning.asStateFlow()
+
+    /**
+     * Catalogue releases travel over this session, through the same code the publisher tool runs.
+     *
+     * Catalogue torrents are added straight to the session and never enter [managedTorrents], so they
+     * sit outside the storage budget, the sharing statistics and the contribution record. They are a
+     * few hundred kilobytes, and they live under `filesDir/catalogue`, never under [downloadDir].
+     */
+    private val catalogueTransport = SwarmCatalogueTransport(
+        session = { if (started) sessionRef else null },
+        sessionRunning = sessionRunning,
+        dhtEnabled = { config.useDht() },
+        extraTrackers = { if (config.useExtraTrackers()) FALLBACK_TRACKERS else emptyList() },
+        log = SwarmLog { level, message, error ->
+            when (level) {
+                SwarmLog.Level.DEBUG -> TorfilxLog.d(CATALOGUE_TAG, message)
+                SwarmLog.Level.INFO -> TorfilxLog.i(CATALOGUE_TAG, message)
+                SwarmLog.Level.WARN -> TorfilxLog.w(CATALOGUE_TAG, message, error)
+                SwarmLog.Level.ERROR -> TorfilxLog.e(CATALOGUE_TAG, message, error)
+            }
+        },
+        ioDispatcher = ioDispatcher,
+    )
+
     /**
      * Where torrent data lives: internal app storage.
      *
@@ -93,6 +137,16 @@ class LibTorrentEngine @Inject constructor(
      */
     private val downloadDir: File by lazy {
         File(context.filesDir, "torrents").apply { mkdirs() }
+    }
+
+    /**
+     * The DHT routing table from the last session.
+     *
+     * Kept outside [downloadDir], which is emptied on every start, so a restarted session rejoins the
+     * DHT from the nodes it already knew instead of bootstrapping from nothing.
+     */
+    private val dhtStateFile: File by lazy {
+        File(context.filesDir, "torrent-session/dht.state")
     }
 
     override fun isAvailable(): Boolean {
@@ -113,6 +167,13 @@ class LibTorrentEngine @Inject constructor(
         sessionMutex.withLock {
             if (started) return@withLock
             if (!isAvailable()) throw TorrentError.EngineUnavailable(null)
+            // A stop that overran its wait may still be inside libtorrent's session destructor, and the
+            // session manager cannot start again until that returns. Give it a moment, then fail with the
+            // engine's own error rather than blocking every caller behind it.
+            if (!sessionShutdown.awaitPending(PENDING_STOP_WAIT_MS)) {
+                TorfilxLog.e(TAG, "The previous torrent session is still shutting down; not starting a new one yet")
+                throw TorrentError.EngineUnavailable(null)
+            }
 
             // Attach the diagnostics listener before the session starts so no early alert is missed.
             runCatching { session.addListener(diagnostics) }
@@ -163,6 +224,14 @@ class LibTorrentEngine @Inject constructor(
                 }
             }.onFailure { TorfilxLog.w(TAG, "Could not toggle the DHT (continuing on trackers)", it) }
 
+            // Rejoin the DHT from the routing table the last session saved. A cold bootstrap through the
+            // public routers takes tens of seconds; a warm one takes a few. Failure only means cold.
+            if (config.useDht()) {
+                runCatching { DhtStateStore.load(session, dhtStateFile) }
+                    .onSuccess { loaded -> if (loaded) TorfilxLog.i(TAG, "DHT state restored from the last session") }
+                    .onFailure { TorfilxLog.w(TAG, "Could not restore the DHT state (starting cold)", it) }
+            }
+
             started = true
             // No resume data is kept, so anything already on disk at this (cold) start is an orphan
             // that can never be resumed — only dead weight that would accumulate and fill the disk
@@ -180,15 +249,28 @@ class LibTorrentEngine @Inject constructor(
                     runCatching { session.isDhtRunning() }.getOrDefault(false)
                 })",
             )
+            _sessionRunning.value = true
         }
     }
 
     override suspend fun stop() = withContext(ioDispatcher) {
         sessionMutex.withLock {
             if (!started) return@withLock
+            // Followers hear first, so a catalogue check in flight is cancelled before its session goes.
+            _sessionRunning.value = false
+            saveDhtState()
             streamServer.stop()
             managedTorrents.clear()
-            runCatching { session.stop() }
+            // libtorrent 1.2 now and then never returns from its session destructor. The wait is bounded
+            // so this lock is released either way; start() refuses to run until the old session is gone.
+            val manager = session
+            val stoppedInTime = sessionShutdown.stopWithin(
+                STOP_WAIT_MS,
+                onError = { TorfilxLog.w(TAG, "Stopping the torrent session failed", it) },
+            ) { manager.stop() }
+            if (!stoppedInTime) {
+                TorfilxLog.e(TAG, "libtorrent did not finish shutting down within ${STOP_WAIT_MS / MS_PER_SECOND} s; it continues in the background")
+            }
             started = false
             TorfilxLog.i(TAG, "Torrent session stopped")
         }
@@ -314,6 +396,12 @@ class LibTorrentEngine @Inject constructor(
         managedTorrents.remove(infoHash)
         val handle = runCatching { session.find(infoHash.toSha1Hash()) }.getOrNull()
         if (handle != null && handle.isValid) {
+            // Only film data is removed here. A torrent saved anywhere else is a catalogue release,
+            // whose lifetime belongs to the catalogue updater.
+            if (!isFilmTorrent(handle)) {
+                TorfilxLog.w(TAG, "Not removing $infoHash: it is not a film torrent")
+                return@withContext
+            }
             runCatching {
                 if (deleteData) {
                     session.remove(handle, org.libtorrent4j.swig.session_handle.delete_files)
@@ -323,6 +411,10 @@ class LibTorrentEngine @Inject constructor(
             }.onFailure { TorfilxLog.w(TAG, "Could not remove torrent $infoHash", it) }
         }
     }
+
+    private fun isFilmTorrent(handle: TorrentHandle): Boolean = runCatching {
+        File(handle.savePath()).canonicalFile.startsWith(downloadDir.canonicalFile)
+    }.getOrDefault(true)
 
     /**
      * Keeps disk usage inside the budget.
@@ -429,6 +521,7 @@ class LibTorrentEngine @Inject constructor(
 
     private fun startStatusPolling() {
         scope.launch {
+            var lastDhtStateSaveMs = System.currentTimeMillis()
             while (isActive && started) {
                 val snapshot = runCatching { collectStatuses() }.getOrDefault(emptyList())
                 _torrents.value = snapshot
@@ -436,9 +529,24 @@ class LibTorrentEngine @Inject constructor(
                 managedTorrents.values.filter { it.isStreaming }
                     .forEach { lastTouched[it.infoHash] = System.currentTimeMillis() }
                 runCatching { guardFreeSpace() }
+                val now = System.currentTimeMillis()
+                if (now - lastDhtStateSaveMs >= DHT_STATE_SAVE_INTERVAL_MS) {
+                    lastDhtStateSaveMs = now
+                    // The process can be killed without stop() ever running, so the routing table is
+                    // also saved while the session is up.
+                    withContext(ioDispatcher) { saveDhtState() }
+                }
                 delay(STATUS_POLL_MS)
             }
         }
+    }
+
+    /** Writes the DHT routing table for the next session. Never throws. */
+    private fun saveDhtState() {
+        if (!config.useDht()) return
+        runCatching { DhtStateStore.save(sessionRef, dhtStateFile) }
+            .onSuccess { bytes -> if (bytes != null) TorfilxLog.d(TAG, "DHT state saved ($bytes bytes)") }
+            .onFailure { TorfilxLog.w(TAG, "Could not save the DHT state", it) }
     }
 
     /**
@@ -486,6 +594,23 @@ class LibTorrentEngine @Inject constructor(
         lastTouched.clear()
         TorfilxLog.i(TAG, "Cleared ${freed / 1_000_000} MB of downloaded data")
     }
+
+    // --- Catalogue transport ---------------------------------------------------------------------
+
+    override fun dhtNodes(): Long = catalogueTransport.dhtNodes()
+
+    override suspend fun resolvePointer(publicKeys: List<ByteArray>, salt: ByteArray, timeoutMs: Long): PointerLookup =
+        catalogueTransport.resolvePointer(publicKeys, salt, timeoutMs)
+
+    override suspend fun download(request: CatalogueDownloadRequest, onProgress: (Float) -> Unit): CatalogueDownload =
+        catalogueTransport.download(request, onProgress)
+
+    override suspend fun seed(torrentBytes: ByteArray, saveDir: File): String =
+        catalogueTransport.seed(torrentBytes, saveDir)
+
+    override suspend fun stopSeeding(infoHash: String) = catalogueTransport.stopSeeding(infoHash)
+
+    // --- Status ----------------------------------------------------------------------------------
 
     private fun collectStatuses(): List<TorrentStatus> = managedTorrents.values.mapNotNull { streamed ->
         val handle = streamed.handle
@@ -572,6 +697,14 @@ class LibTorrentEngine @Inject constructor(
     }
 
     private companion object {
+        const val CATALOGUE_TAG = "CatalogSwarm"
+
+        /** How long stop() waits for libtorrent's session destructor before carrying on without it. */
+        const val STOP_WAIT_MS = 20_000L
+
+        /** How long start() waits for a stop that overran before reporting the engine unavailable. */
+        const val PENDING_STOP_WAIT_MS = 5_000L
+        const val MS_PER_SECOND = 1_000L
         const val MAX_ACTIVE_DOWNLOADS = 2
         const val MAX_ACTIVE_SEEDS = 4
         const val CONNECTION_LIMIT = 120
@@ -596,6 +729,7 @@ class LibTorrentEngine @Inject constructor(
 
         const val POLL_INTERVAL_MS = 250L
         const val STATUS_POLL_MS = 1_000L
+        const val DHT_STATE_SAVE_INTERVAL_MS = 10 * 60_000L
         val VIDEO_EXTENSIONS = listOf(".mp4", ".mkv", ".avi", ".mov", ".m4v", ".webm", ".mpg", ".mpeg")
     }
 }

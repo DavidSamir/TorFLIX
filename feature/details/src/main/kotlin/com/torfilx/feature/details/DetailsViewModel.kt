@@ -3,7 +3,7 @@ package com.torfilx.feature.details
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.torfilx.core.data.catalog.BundledCatalog
+import com.torfilx.core.data.catalog.Catalog
 import com.torfilx.core.data.repository.MediaRepository
 import com.torfilx.core.data.repository.MyListRepository
 import com.torfilx.core.data.repository.ProgressRepository
@@ -43,7 +43,7 @@ class DetailsViewModel @Inject constructor(
     mediaRepository: MediaRepository,
     private val progressRepository: ProgressRepository,
     private val myListRepository: MyListRepository,
-    catalog: BundledCatalog,
+    catalog: Catalog,
     private val settingsRepository: SettingsRepository,
     torrentCoordinator: TorrentCoordinator,
 ) : ViewModel() {

@@ -4,7 +4,9 @@ import com.torfilx.core.common.di.Dispatcher
 import com.torfilx.core.common.di.TorfilxDispatcher
 import com.torfilx.core.common.log.TorfilxLog
 import com.torfilx.core.common.time.TimeProvider
-import com.torfilx.core.data.catalog.BundledCatalog
+import com.torfilx.core.data.catalog.Catalog
+import com.torfilx.core.data.catalog.CatalogSnapshot
+import com.torfilx.core.data.catalog.CatalogueInfo
 import com.torfilx.core.data.database.SearchHistoryDao
 import com.torfilx.core.model.HomeRow
 import com.torfilx.core.model.HomeRowKind
@@ -17,9 +19,10 @@ import com.torfilx.core.model.SearchResult
 import com.torfilx.core.model.WatchedFilter
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
@@ -29,17 +32,18 @@ import javax.inject.Singleton
 /**
  * The library.
  *
- * One source of titles: the catalogue bundled with the app. What is dynamic lives in Room —
- * playback progress and My List — and is merged in here.
+ * One source of titles, the catalogue in use (bundled, or a newer signed release from the peer
+ * network), merged with what is dynamic and lives in Room: playback progress and My List.
  *
- * Everything derived purely from the catalogue (sort orders, genre groupings) is computed **once**
- * and cached. Only the cheap decoration step re-runs when progress changes, because progress changes
- * every ten seconds during playback and a Fire TV Stick cannot afford to rebuild thousands of cards
- * each time.
+ * Everything derived purely from the catalogue (sort orders, genre groupings) is computed **once per
+ * catalogue** and cached. Only the cheap decoration step re-runs when progress changes, because progress
+ * changes every ten seconds during playback and a Fire TV Stick cannot afford to rebuild thousands of
+ * cards each time. When a new catalogue is swapped in, its generation changes, every flow below
+ * re-emits, and the views are rebuilt once for it.
  */
 @Singleton
 class MediaRepository @Inject constructor(
-    private val catalog: BundledCatalog,
+    private val catalog: Catalog,
     private val searchHistoryDao: SearchHistoryDao,
     private val progressRepository: ProgressRepository,
     private val myListRepository: MyListRepository,
@@ -47,8 +51,9 @@ class MediaRepository @Inject constructor(
     @Dispatcher(TorfilxDispatcher.IO) private val ioDispatcher: CoroutineDispatcher,
 ) {
 
-    /** Catalogue-derived structure, independent of local state. Built lazily, then kept. */
+    /** Catalogue-derived structure, independent of local state, for one catalogue generation. */
     private class CatalogViews(
+        val generation: Int,
         val byRecent: List<MediaItem>,
         val byTitle: List<MediaItem>,
         val byYear: List<MediaItem>,
@@ -62,25 +67,30 @@ class MediaRepository @Inject constructor(
     private var views: CatalogViews? = null
 
     /**
-     * Catalogue-derived views, built once — but never cached from an incomplete catalogue.
+     * Catalogue-derived views for the catalogue in use, built once per generation.
      *
-     * These sit downstream of the asset read, so caching them from a short read would preserve a
-     * broken library even after the catalogue itself recovered. Rebuilding a few sorted lists is
-     * cheap next to being stuck with a fraction of the content until the process is killed.
+     * Never cached from a catalogue the catalogue itself would not keep (empty or incomplete): views
+     * cached from a short read would preserve a broken library even after the catalogue recovered.
      */
-    private fun views(): CatalogViews = views ?: synchronized(this) {
-        views ?: buildViews().also { built ->
-            if (!catalog.isIncomplete) views = built
+    private fun views(): CatalogViews {
+        val snapshot = catalog.snapshot()
+        views?.takeIf { it.generation == snapshot.info.generation && snapshot.isKept() }?.let { return it }
+        return synchronized(this) {
+            views?.takeIf { it.generation == snapshot.info.generation && snapshot.isKept() }
+                ?: buildViews(snapshot).also { built -> if (snapshot.isKept()) views = built }
         }
     }
 
-    private fun buildViews(): CatalogViews {
-        val items = catalog.mediaItems()
+    private fun CatalogSnapshot.isKept(): Boolean = items.isNotEmpty() && !isIncomplete
+
+    private fun buildViews(snapshot: CatalogSnapshot): CatalogViews {
+        val items = snapshot.mediaItems
         val byGenre = LinkedHashMap<String, MutableList<MediaItem>>()
         items.forEach { item ->
             item.genres.forEach { genre -> byGenre.getOrPut(genre) { ArrayList() }.add(item) }
         }
         return CatalogViews(
+            generation = snapshot.info.generation,
             byRecent = items.sortedByDescending { it.addedAtMs ?: it.year?.toLong() ?: 0L },
             byTitle = items.sortedBy { it.sortTitle.lowercase() },
             byYear = items.sortedByDescending { it.year ?: 0 },
@@ -103,17 +113,24 @@ class MediaRepository @Inject constructor(
         MediaCard(item = item, progress = progress[item.id], inMyList = item.id in myList)
     }
 
+    // --- Catalogue -------------------------------------------------------------------------------
+
+    /** Which catalogue is in use; changes when a newer release is swapped in. */
+    fun observeCatalogue(): StateFlow<CatalogueInfo> = catalog.info
+
     // --- Library ---------------------------------------------------------------------------------
 
     fun observeLibrary(query: LibraryQuery): Flow<List<MediaCard>> = combine(
+        catalog.info,
         progressRepository.observeAllProgress(),
         myListRepository.itemIds,
-    ) { progress, myList ->
+    ) { _, progress, myList ->
+        val data = views()
         val sorted = when (query.sort) {
-            LibrarySort.RECENTLY_ADDED -> views().byRecent
-            LibrarySort.ALPHABETICAL -> views().byTitle
-            LibrarySort.YEAR -> views().byYear
-            LibrarySort.RATING -> views().byRating
+            LibrarySort.RECENTLY_ADDED -> data.byRecent
+            LibrarySort.ALPHABETICAL -> data.byTitle
+            LibrarySort.YEAR -> data.byYear
+            LibrarySort.RATING -> data.byRating
         }
         sorted.asSequence()
             .filter { item -> query.genre == null || query.genre in item.genres }
@@ -124,9 +141,12 @@ class MediaRepository @Inject constructor(
             .toList()
     }.flowOn(ioDispatcher)
 
-    fun observeItemCount(): Flow<Int> = flowOf(catalog.mediaItems().size)
+    fun observeItemCount(): Flow<Int> = catalog.info
+        .map { catalog.mediaItems().size }
+        .distinctUntilChanged()
+        .flowOn(ioDispatcher)
 
-    /** Titles the catalogue file declares. Differs from the loaded count only when a read failed. */
+    /** Titles the catalogue declares. Differs from the loaded count only when a read failed. */
     fun declaredItemCount(): Int = catalog.declaredTitleCount()
 
     suspend fun genres(): List<String> = withContext(ioDispatcher) { catalog.genres() }
@@ -136,15 +156,15 @@ class MediaRepository @Inject constructor(
     /**
      * Home rows: Continue Watching, the catalogue, My List, then a row per genre.
      *
-     * Rows are capped at [MAX_ROW_ITEMS]: a row nobody can reach the end of with a D-pad costs
-     * memory and scroll performance for nothing — the Movies grid is where the whole catalogue is
-     * browsed.
+     * Rows are capped at [MAX_ROW_ITEMS]: a row nobody can reach the end of with a D-pad costs memory
+     * and scroll performance for nothing. The Movies grid is where the whole catalogue is browsed.
      */
     fun observeHome(): Flow<List<HomeRow>> = combine(
+        catalog.info,
         progressRepository.observeContinueWatching(),
         progressRepository.observeAllProgress(),
         myListRepository.itemIds,
-    ) { continueWatching, progress, myListIds ->
+    ) { _, continueWatching, progress, myListIds ->
         val data = views()
 
         buildList {
@@ -206,7 +226,11 @@ class MediaRepository @Inject constructor(
 
     // --- Details ---------------------------------------------------------------------------------
 
-    fun observeItem(id: String): Flow<MediaItem?> = flowOf(catalog.item(id)?.item)
+    /** The item, re-emitted if a newer catalogue changes it (or drops it). */
+    fun observeItem(id: String): Flow<MediaItem?> = catalog.info
+        .map { catalog.item(id)?.item }
+        .distinctUntilChanged()
+        .flowOn(ioDispatcher)
 
     suspend fun item(id: String): MediaItem? = withContext(ioDispatcher) { catalog.item(id)?.item }
 
@@ -261,14 +285,14 @@ class MediaRepository @Inject constructor(
         const val ROW_CONTINUE_WATCHING = "continue-watching"
         const val ROW_MY_LIST = "my-list"
         const val ROW_CATALOG = "catalog"
+
         /**
          * How many search results are returned.
          *
-         * This was 60, which quietly truncated any broad query — searching a common word in a
-         * 2000-title catalogue returned the first 60 matches and nothing said so. The cap exists
-         * only to bound the work done per keystroke on a very slow CPU, and 500 titles of card
-         * wrappers is well within that; the results grid is lazy, so nothing beyond the visible rows
-         * is laid out.
+         * This was 60, which quietly truncated any broad query: searching a common word in a
+         * 2000-title catalogue returned the first 60 matches and nothing said so. The cap exists only
+         * to bound the work done per keystroke on a very slow CPU, and 500 titles of card wrappers is
+         * well within that; the results grid is lazy, so nothing beyond the visible rows is laid out.
          */
         const val SEARCH_LIMIT = 500
         const val RECENT_SEARCH_LIMIT = 10
@@ -282,8 +306,8 @@ class MediaRepository @Inject constructor(
          * Every genre gets a row.
          *
          * This was 12, which silently hid nine of the catalogue's genres and a large slice of the
-         * library behind them — part of why the app looked like it held a fraction of what it does.
-         * The rows are lazy, so the cost of the extra ones is a list of card wrappers, not layout.
+         * library behind them. The rows are lazy, so the cost of the extra ones is a list of card
+         * wrappers, not layout.
          */
         private const val MAX_GENRE_ROWS = 32
         private const val MIN_GENRE_ROW_SIZE = 2

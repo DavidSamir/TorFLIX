@@ -2,6 +2,7 @@ package com.torfilx.core.data.torrent
 
 import com.torfilx.core.common.di.ApplicationScope
 import com.torfilx.core.common.log.TorfilxLog
+import com.torfilx.core.data.catalog.CatalogueSessionGate
 import com.torfilx.core.data.repository.ContributionRepository
 import com.torfilx.core.data.settings.SettingsRepository
 import com.torfilx.core.torrent.LibTorrentEngine
@@ -39,7 +40,7 @@ class TorrentCoordinator @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val contributionRepository: ContributionRepository,
     @ApplicationScope private val scope: CoroutineScope,
-) {
+) : CatalogueSessionGate {
 
     @Volatile
     private var lastOnDiskSyncMs: Long = 0L
@@ -87,7 +88,8 @@ class TorrentCoordinator @Inject constructor(
         //
         // Deliberately attached to the status flow the engine already emits once a second rather
         // than given a loop of its own: the contribution record must cost a subtraction per active
-        // torrent, not a second timer competing for a very small CPU.
+        // torrent, not a second timer competing for a very small CPU. Catalogue torrents are not in
+        // this flow, so they never count as titles shared.
         engine.torrents
             .onEach { statuses ->
                 val now = System.currentTimeMillis()
@@ -96,7 +98,7 @@ class TorrentCoordinator @Inject constructor(
                     consented = settingsRepository.cachedSharingConsent,
                     nowMs = now,
                 )
-                // Reconciled rarely — this is only about whether a row can still show a piece strip,
+                // Reconciled rarely: this is only about whether a row can still show a piece strip,
                 // and it costs two small writes.
                 if (now - lastOnDiskSyncMs >= ON_DISK_SYNC_INTERVAL_MS) {
                     lastOnDiskSyncMs = now
@@ -113,7 +115,7 @@ class TorrentCoordinator @Inject constructor(
      *
      * The DHT takes tens of seconds to bootstrap from cold. Starting the session only when the user
      * presses Play meant the first title of every session raced a DHT with zero nodes and timed out
-     * looking for peers — the reported "it says network error, and works on the third or fourth
+     * looking for peers: the reported "it says network error, and works on the third or fourth
      * retry", because by then the DHT had finally populated.
      *
      * Only runs once consent exists: without it nothing may be downloaded or uploaded anyway, and
@@ -143,6 +145,20 @@ class TorrentCoordinator @Inject constructor(
     private var warmedUp: Boolean = false
 
     /**
+     * Starts the session for a catalogue check the viewer asked for, if their consent allows it.
+     *
+     * The same rule as [warmUp]: no consent, no session. With consent this is just an early start of
+     * the session the app would bring up anyway.
+     */
+    override suspend fun ensureRunning(): Boolean {
+        if (!settingsRepository.sharingConsent.first()) return false
+        settingsRepository.cachedSharingConsent = true
+        return runCatching { engine.start() }
+            .onFailure { TorfilxLog.w(TAG, "Could not start the torrent session for a catalogue check", it) }
+            .isSuccess
+    }
+
+    /**
      * Which parts of a title are cached here, for the contribution page.
      *
      * Null once the data has been evicted; the contribution record outlives the file.
@@ -170,6 +186,7 @@ class TorrentCoordinator @Inject constructor(
      *
      * The contribution record goes too. A per-title log of what someone has seeded is exactly the
      * sort of thing "clear my data" has to mean, and leaving it behind would be a nasty surprise.
+     * The downloaded catalogue is not film data and stays; Settings has its own control for it.
      */
     suspend fun clearAllData() {
         engine.purgeAllData()
@@ -183,7 +200,7 @@ class TorrentCoordinator @Inject constructor(
     }
 
     private companion object {
-        /** How often the on-disk flags are reconciled. Rare on purpose — it is two small writes. */
+        /** How often the on-disk flags are reconciled. Rare on purpose: it is two small writes. */
         const val ON_DISK_SYNC_INTERVAL_MS = 60_000L
     }
 }
@@ -220,4 +237,8 @@ abstract class TorrentCoordinatorModule {
     abstract fun bindsTorrentConfigProvider(
         impl: SettingsTorrentConfigProvider,
     ): TorrentConfigProvider
+
+    @Binds
+    @Singleton
+    abstract fun bindsCatalogueSessionGate(impl: TorrentCoordinator): CatalogueSessionGate
 }

@@ -65,6 +65,23 @@ base64 -i torfilx-release.jks      # macOS
 4. The CI log prints the signing certificate fingerprint ("Record the signing certificate" step).
    It must be identical across releases — if it ever changes, in-place upgrades will break.
 
+## Catalogue releases are separate from APK releases
+
+The film catalogue is published over the peer network, signed with the catalogue publisher key, and
+reaches installed apps without a new APK. The full runbook is in `docs/CATALOGUE_P2P.md`.
+
+Two things tie the two kinds of release together:
+
+- **Refresh the bundled catalogue when cutting an APK.** Build the latest catalogue release with
+  `--asset-dir core/data/src/main/assets`, so a new install starts from it. `BundledCatalogueReleaseTest`
+  fails if `catalog.json` and `catalog-manifest.json` do not match.
+- **The publisher public key lives in the APK** (`productionCataloguePublisherKeys` in
+  `core/data/build.gradle.kts`). Changing it is a key rotation; follow the rotation steps in
+  `docs/CATALOGUE_P2P.md`, or installed apps stop accepting catalogue updates.
+
+The publisher seed is a secret in the same class as the release keystore: never commit it, keep it
+backed up, and never add it to CI.
+
 ## Local release build (debug-signed, for your own testing)
 
 ```bash

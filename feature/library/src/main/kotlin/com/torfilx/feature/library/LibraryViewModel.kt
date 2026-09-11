@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChangedBy
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -35,6 +36,8 @@ data class LibraryUiState(
     val query: LibraryQuery = LibraryQuery(),
     val isLoading: Boolean = true,
     val errorMessage: String? = null,
+    /** The release number of the catalogue in use; 0 when the catalogue carries none. */
+    val catalogueVersion: Long = 0,
 ) {
     val isEmpty: Boolean get() = !isLoading && cards.isEmpty()
 }
@@ -75,8 +78,10 @@ class LibraryViewModel @Inject constructor(
         cards,
         genres,
         query,
-        combine(loading, errorMessage) { isLoading, error -> isLoading to error },
-    ) { currentMode, items, genreList, currentQuery, (isLoading, error) ->
+        combine(loading, errorMessage, mediaRepository.observeCatalogue()) { isLoading, error, catalogue ->
+            Triple(isLoading, error, catalogue.version)
+        },
+    ) { currentMode, items, genreList, currentQuery, (isLoading, error, catalogueVersion) ->
         LibraryUiState(
             mode = currentMode,
             cards = items,
@@ -84,11 +89,18 @@ class LibraryViewModel @Inject constructor(
             query = currentQuery,
             isLoading = isLoading && items.isEmpty(),
             errorMessage = error,
+            catalogueVersion = catalogueVersion,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), LibraryUiState())
 
     init {
-        viewModelScope.launch { genres.value = mediaRepository.genres() }
+        // Genres come from the catalogue in use, so they are read again whenever a newer one is
+        // swapped in; a genre chip must never offer a genre the grid no longer has.
+        viewModelScope.launch {
+            mediaRepository.observeCatalogue()
+                .distinctUntilChangedBy { it.generation }
+                .collect { genres.value = mediaRepository.genres() }
+        }
         refresh()
     }
 
@@ -118,7 +130,10 @@ class LibraryViewModel @Inject constructor(
         }
     }
 
-    /** The catalogue ships with the app; "refresh" only re-reads the local genre list. */
+    /**
+     * The catalogue is local (bundled, or already downloaded), so "refresh" only re-reads the genre
+     * list. Newer catalogues arrive on their own and every flow above follows them.
+     */
     fun refresh() {
         viewModelScope.launch {
             loading.value = true

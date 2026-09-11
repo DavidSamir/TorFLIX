@@ -1,6 +1,6 @@
 package com.torfilx.core.player
 
-import com.torfilx.core.data.catalog.BundledCatalog
+import com.torfilx.core.data.catalog.Catalog
 import com.torfilx.core.model.PlaybackInfo
 import com.torfilx.core.player.capability.DeviceCapabilitiesProvider
 import java.util.concurrent.ConcurrentHashMap
@@ -10,12 +10,12 @@ import javax.inject.Singleton
 /**
  * Where the player gets its sources.
  *
- * With no media server, every source is a magnet from the bundled catalogue. Failed sources are
+ * With no media server, every source is a magnet from the catalogue in use. Failed sources are
  * remembered for the session so a quality that will not play is not retried on every attempt.
  */
 @Singleton
 class PlaybackInfoRepository @Inject constructor(
-    private val catalog: BundledCatalog,
+    private val catalog: Catalog,
     private val capabilitiesProvider: DeviceCapabilitiesProvider,
 ) {
 

@@ -22,8 +22,9 @@ import javax.inject.Inject
 /**
  * What Home renders.
  *
- * The catalogue ships with the app, so there is no loading, no network error and no "configure your
- * server" state to model — either there are titles or the catalogue file is empty/broken.
+ * The catalogue is always local (bundled with the app, or a newer signed release already downloaded),
+ * so there is no network error and no "configure your server" state to model: either there are titles
+ * or the catalogue is empty or broken. A newer catalogue arriving just makes Content emit again.
  */
 sealed interface HomeUiState {
     data object Loading : HomeUiState
@@ -33,7 +34,7 @@ sealed interface HomeUiState {
         val rows: List<HomeRow>,
     ) : HomeUiState
 
-    /** The bundled catalogue produced no playable entries (missing file or every magnet invalid). */
+    /** The catalogue in use produced no playable entries (missing file or every magnet invalid). */
     data object EmptyCatalog : HomeUiState
 }
 

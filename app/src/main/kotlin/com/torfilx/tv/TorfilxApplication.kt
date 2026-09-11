@@ -15,7 +15,8 @@ import coil3.request.bitmapConfig
 import coil3.request.crossfade
 import com.torfilx.core.common.di.ApplicationScope
 import com.torfilx.core.common.log.TorfilxLog
-import com.torfilx.core.data.catalog.BundledCatalog
+import com.torfilx.core.data.catalog.Catalog
+import com.torfilx.core.data.catalog.CatalogUpdater
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -36,7 +37,10 @@ private const val TAG = "App"
 class TorfilxApplication : Application(), SingletonImageLoader.Factory {
 
     @Inject
-    lateinit var catalog: BundledCatalog
+    lateinit var catalog: Catalog
+
+    @Inject
+    lateinit var catalogUpdater: dagger.Lazy<CatalogUpdater>
 
     @Inject
     lateinit var torrentEngine: dagger.Lazy<com.torfilx.core.torrent.TorrentEngine>
@@ -66,7 +70,12 @@ class TorfilxApplication : Application(), SingletonImageLoader.Factory {
 
         // Parse and index the catalogue before the first screen asks for it, off the main thread:
         // with a few thousand entries this is tens of milliseconds that must not land on a frame.
-        applicationScope.launch { catalog.preload() }
+        applicationScope.launch {
+            catalog.preload()
+            // Follows the torrent session to keep the catalogue current from the peer network. It never
+            // starts a session itself, so nothing reaches the network before the viewer consents to sharing.
+            catalogUpdater.get().start()
+        }
 
         // Say plainly, once per launch, whether the BitTorrent engine can run on this device.
         // Without it the only symptom is a message at the end of the play flow, long after the fact,

@@ -2,13 +2,14 @@ package com.torfilx.core.data.repository
 
 import com.torfilx.core.common.log.TorfilxLog
 import com.torfilx.core.common.time.TimeProvider
-import com.torfilx.core.data.catalog.BundledCatalog
+import com.torfilx.core.data.catalog.Catalog
 import com.torfilx.core.data.database.ProgressDao
 import com.torfilx.core.data.database.ProgressEntity
 import com.torfilx.core.model.MediaCard
 import com.torfilx.core.model.PlaybackProgress
 import com.torfilx.core.model.ResumeRules
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -16,7 +17,7 @@ import javax.inject.Singleton
 private const val TAG = "Progress"
 
 /**
- * Playback progress — the one piece of state the viewer really notices losing.
+ * Playback progress: the one piece of state the viewer really notices losing.
  *
  * Everything is local: written to Room the moment it changes, so it survives the app being killed,
  * the device rebooting and playback failing halfway.
@@ -24,14 +25,14 @@ private const val TAG = "Progress"
 @Singleton
 class ProgressRepository @Inject constructor(
     private val progressDao: ProgressDao,
-    private val catalog: BundledCatalog,
+    private val catalog: Catalog,
     private val timeProvider: TimeProvider,
 ) {
 
     fun observe(itemId: String): Flow<PlaybackProgress?> =
         progressDao.observe(itemId).map { it?.toDomain() }
 
-    /** Every known progress row, keyed by item id — used to decorate rows and grids. */
+    /** Every known progress row, keyed by item id; used to decorate rows and grids. */
     fun observeAllProgress(): Flow<Map<String, PlaybackProgress>> =
         progressDao.observeEverything().map { list -> list.associate { it.itemId to it.toDomain() } }
 
@@ -88,11 +89,12 @@ class ProgressRepository @Inject constructor(
     /**
      * Continue Watching, newest first.
      *
-     * Entries whose film is no longer in the catalogue are skipped rather than shown as a blank
-     * card — the catalogue can change with an app update.
+     * Entries whose film is not in the catalogue in use are skipped rather than shown as a blank card.
+     * The catalogue can change while the app runs, so the row is re-evaluated whenever it does; the
+     * progress itself is kept, and reappears if a later catalogue brings the film back.
      */
     fun observeContinueWatching(limit: Int = CONTINUE_WATCHING_LIMIT): Flow<List<MediaCard>> =
-        progressDao.observeEverything().map { rows ->
+        combine(progressDao.observeEverything(), catalog.info) { rows, _ ->
             rows.map { it.toDomain() }
                 .filter { ResumeRules.belongsInContinueWatching(it) }
                 .sortedByDescending { it.updatedAtMs }

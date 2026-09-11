@@ -4,6 +4,10 @@ import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.torfilx.core.common.log.TorfilxLog
+import com.torfilx.core.data.catalog.CatalogUpdateState
+import com.torfilx.core.data.catalog.CatalogUpdater
+import com.torfilx.core.data.catalog.CatalogueInfo
+import com.torfilx.core.data.catalog.CatalogueUpdateRecord
 import com.torfilx.core.data.repository.MediaRepository
 import com.torfilx.core.data.settings.SettingsRepository
 import com.torfilx.core.data.torrent.TorrentCoordinator
@@ -14,12 +18,12 @@ import com.torfilx.core.model.StreamingMode
 import com.torfilx.core.torrent.SharingStats
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -34,14 +38,26 @@ data class SettingsUiState(
     val storageFraction: Float = 0.5f,
     val sharingStats: SharingStats = SharingStats(),
     val torrentAvailable: Boolean = false,
+    val catalogue: CatalogueSettingsState = CatalogueSettingsState(),
     val message: String? = null,
 )
 
+/** Everything the Catalogue section shows. */
+data class CatalogueSettingsState(
+    val inUse: CatalogueInfo = CatalogueInfo(),
+    val bundledVersion: Long = 0,
+    val updatesEnabled: Boolean = true,
+    val update: CatalogUpdateState = CatalogUpdateState.Idle,
+    val record: CatalogueUpdateRecord = CatalogueUpdateRecord(),
+    /** False for a build that trusts no publisher key, which can never update. */
+    val publisherConfigured: Boolean = true,
+)
+
 /**
- * Settings for a server-less app: playback preferences, language, and everything about sharing.
+ * Settings for a server-less app: playback preferences, language, sharing, and the catalogue.
  *
- * There is no server address, token or connection test any more — the catalogue ships with the app
- * and playback happens over BitTorrent.
+ * There is no server address, token or connection test. The catalogue ships with the app and is kept
+ * current from the peer network; playback happens over BitTorrent.
  */
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
@@ -49,11 +65,30 @@ class SettingsViewModel @Inject constructor(
     private val settingsRepository: SettingsRepository,
     private val mediaRepository: MediaRepository,
     private val torrentCoordinator: TorrentCoordinator,
+    private val catalogUpdater: CatalogUpdater,
     private val crashStore: com.torfilx.core.common.log.CrashStore,
     private val userDataBackup: com.torfilx.core.data.backup.UserDataBackup,
 ) : ViewModel() {
 
     private val message = MutableStateFlow<String?>(null)
+    private val bundledVersion = MutableStateFlow(0L)
+
+    private val catalogue: kotlinx.coroutines.flow.Flow<CatalogueSettingsState> = combine(
+        mediaRepository.observeCatalogue(),
+        settingsRepository.catalogUpdatesEnabled,
+        catalogUpdater.state,
+        settingsRepository.catalogueUpdateRecord,
+        bundledVersion,
+    ) { inUse, enabled, update, record, bundled ->
+        CatalogueSettingsState(
+            inUse = inUse,
+            bundledVersion = bundled,
+            updatesEnabled = enabled,
+            update = update,
+            record = record,
+            publisherConfigured = catalogUpdater.isConfigured,
+        )
+    }
 
     val uiState: StateFlow<SettingsUiState> = combine(
         settingsRepository.settings,
@@ -63,8 +98,9 @@ class SettingsViewModel @Inject constructor(
             settingsRepository.storageFraction,
             torrentCoordinator.stats,
         ) { consent, seeding, fraction, stats -> SharingSnapshot(consent, seeding, fraction, stats) },
+        catalogue,
         message,
-    ) { settings, sharing, msg ->
+    ) { settings, sharing, catalogueState, msg ->
         SettingsUiState(
             settings = settings,
             sharingConsent = sharing.consent,
@@ -72,6 +108,7 @@ class SettingsViewModel @Inject constructor(
             storageFraction = sharing.fraction,
             sharingStats = sharing.stats,
             torrentAvailable = torrentCoordinator.isAvailable(),
+            catalogue = catalogueState,
             message = msg,
         )
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), SettingsUiState())
@@ -82,6 +119,10 @@ class SettingsViewModel @Inject constructor(
         val fraction: Float,
         val stats: SharingStats,
     )
+
+    init {
+        viewModelScope.launch { bundledVersion.value = catalogUpdater.bundledCatalogueVersion() }
+    }
 
     /** Turning sharing off stops uploading immediately and makes torrent playback unavailable. */
     fun setSharingConsent(consented: Boolean) {
@@ -108,6 +149,31 @@ class SettingsViewModel @Inject constructor(
                 else -> 0.25f
             }
             settingsRepository.setStorageFraction(next)
+        }
+    }
+
+    // --- Catalogue -------------------------------------------------------------------------------
+
+    fun setCatalogUpdatesEnabled(enabled: Boolean) =
+        launchSetting { settingsRepository.setCatalogUpdatesEnabled(enabled) }
+
+    /** Looks for a newer catalogue now. Starts the peer network if sharing is on and it is not running. */
+    fun checkCatalogueNow() {
+        if (!catalogUpdater.checkNow()) message.value = "A catalogue check is already running."
+    }
+
+    /** Drops the downloaded catalogue and goes back to the one inside the app. */
+    fun useBundledCatalogue() {
+        viewModelScope.launch {
+            runCatching { catalogUpdater.resetToBundled() }
+                .onSuccess {
+                    message.value = "Back on the built-in catalogue. The catalogue you left will not be " +
+                        "downloaded again; a newer one still will."
+                }
+                .onFailure {
+                    TorfilxLog.w(TAG, "Could not go back to the built-in catalogue", it)
+                    message.value = "Could not switch catalogues: ${it.message}"
+                }
         }
     }
 
@@ -175,6 +241,8 @@ class SettingsViewModel @Inject constructor(
                 "Android ${android.os.Build.VERSION.RELEASE} (API ${android.os.Build.VERSION.SDK_INT}) · " +
                 "abi ${android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "?"}",
         )
+        val inUse = uiState.value.catalogue.inUse
+        appendLine("catalogue: ${inUse.origin} ${inUse.version} · ${inUse.titleCount} titles")
         appendLine()
         val crashes = crashStore.readAll()
         if (crashes.isNotBlank()) {

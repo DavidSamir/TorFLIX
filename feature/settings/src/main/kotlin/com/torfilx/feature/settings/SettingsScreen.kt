@@ -25,6 +25,8 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import com.torfilx.core.data.catalog.CatalogUpdateState
+import com.torfilx.core.data.catalog.CatalogueOrigin
 import com.torfilx.core.model.MetadataTimeout
 import com.torfilx.core.model.QualityPreference
 import com.torfilx.core.model.StreamingMode
@@ -36,6 +38,9 @@ import com.torfilx.core.ui.component.TvButton
 import com.torfilx.core.ui.component.TvChip
 import com.torfilx.core.ui.theme.LocalTorfilxDimens
 import com.torfilx.core.ui.theme.TorfilxColors
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 /** Which text field the on-screen keyboard is currently editing. */
 private enum class EditingField { NONE, AUDIO_LANGUAGE, SUBTITLE_LANGUAGE }
@@ -206,6 +211,16 @@ fun SettingsScreen(
                 }
             }
 
+            item(key = "catalogue") {
+                CatalogueSection(
+                    state = state.catalogue,
+                    torrentAvailable = state.torrentAvailable,
+                    onToggleUpdates = viewModel::setCatalogUpdatesEnabled,
+                    onCheckNow = viewModel::checkCatalogueNow,
+                    onUseBundled = viewModel::useBundledCatalogue,
+                )
+            }
+
             item(key = "engine") {
                 SettingsSection("Streaming engine") {
                     Text(
@@ -334,6 +349,94 @@ fun SettingsScreen(
         }
     }
 }
+
+/**
+ * Which catalogue is on this TV, and how it is kept current.
+ *
+ * The buttons stay enabled while a check runs rather than greying out: a disabled control cannot hold
+ * focus, and focus jumping away mid-check is worse on a remote than a message saying a check is
+ * already running.
+ */
+@Composable
+private fun CatalogueSection(
+    state: CatalogueSettingsState,
+    torrentAvailable: Boolean,
+    onToggleUpdates: (Boolean) -> Unit,
+    onCheckNow: () -> Unit,
+    onUseBundled: () -> Unit,
+) {
+    SettingsSection("Catalogue") {
+        Text(
+            text = catalogueSummary(state),
+            style = MaterialTheme.typography.bodyMedium,
+            color = TorfilxColors.TextPrimary,
+        )
+        when {
+            !state.publisherConfigured -> Text(
+                text = "This build trusts no catalogue publisher, so it keeps the catalogue it came with.",
+                style = MaterialTheme.typography.labelMedium,
+                color = TorfilxColors.TextTertiary,
+            )
+            !torrentAvailable -> Text(
+                text = "BitTorrent is not available on this device, so the catalogue cannot be updated.",
+                style = MaterialTheme.typography.labelMedium,
+                color = TorfilxColors.TextTertiary,
+            )
+            else -> {
+                SettingsToggleRow(
+                    label = "Update the catalogue over the peer network",
+                    description = "Looks for a newer catalogue signed by its publisher, and shares the " +
+                        "one you have. Needs sharing on. No server is involved.",
+                    checked = state.updatesEnabled,
+                    onToggle = onToggleUpdates,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    TvButton(text = "Check for a new catalogue", onClick = onCheckNow, primary = false)
+                    if (state.inUse.origin == CatalogueOrigin.FETCHED) {
+                        TvButton(text = "Use the built-in catalogue", onClick = onUseBundled, primary = false)
+                    }
+                }
+                Text(
+                    text = catalogueStatus(state),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = TorfilxColors.TextSecondary,
+                )
+            }
+        }
+    }
+}
+
+private fun catalogueSummary(state: CatalogueSettingsState): String {
+    val inUse = state.inUse
+    val titles = if (inUse.titleCount == 1) "1 title" else "${inUse.titleCount} titles"
+    return when (inUse.origin) {
+        CatalogueOrigin.FETCHED -> buildString {
+            append("Catalogue ").append(inUse.version).append(" · ").append(titles)
+            inUse.installedAtMs?.let { append(" · installed ").append(formatDateTime(it)) }
+        }
+        CatalogueOrigin.BUNDLED ->
+            if (inUse.version > 0) "Built-in catalogue ${inUse.version} · $titles" else "Built-in catalogue · $titles"
+    }
+}
+
+private fun catalogueStatus(state: CatalogueSettingsState): String = when (val update = state.update) {
+    CatalogUpdateState.Idle -> when {
+        !state.updatesEnabled -> "Automatic updates are off."
+        else -> state.record.lastCheckMs?.let { "Last checked ${formatDateTime(it)}." }
+            ?: "Checks start once sharing is on and the peer network is running."
+    }
+    is CatalogUpdateState.Checking -> "Looking for a newer catalogue…"
+    is CatalogUpdateState.Downloading ->
+        "Downloading catalogue ${update.version}… ${(update.progress * PERCENT).toInt()}%"
+    is CatalogUpdateState.UpToDate -> "Up to date · checked ${formatDateTime(update.checkedAtMs)}."
+    is CatalogUpdateState.Updated -> "Updated to catalogue ${update.version} · ${update.titleCount} titles."
+    is CatalogUpdateState.Failed -> "${update.reason.message} · ${formatDateTime(update.atMs)}."
+}
+
+private const val PERCENT = 100
+
+private fun formatDateTime(epochMs: Long): String =
+    SimpleDateFormat("d MMM, HH:mm", Locale.getDefault()).format(Date(epochMs))
 
 @Composable
 private fun SettingsSection(title: String, content: @Composable () -> Unit) {

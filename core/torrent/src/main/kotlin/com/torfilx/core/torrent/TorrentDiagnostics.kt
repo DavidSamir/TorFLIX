@@ -102,6 +102,14 @@ internal class TorrentDiagnostics : AlertListener {
                         lastError = alert.message()
                         record("error: ${alert.message()}")
                     }
+                    // Catalogue pointer lookups. Only the authoritative answer is recorded: libtorrent
+                    // also reports every interim improvement, which would crowd out everything else.
+                    AlertType.DHT_MUTABLE_ITEM -> {
+                        val item = (alert as? org.libtorrent4j.alerts.DhtMutableItemAlert)?.swig()
+                        if (item != null && item.getAuthoritative()) {
+                            record("DHT catalogue item: seq=${item.get_seq()} authoritative")
+                        }
+                    }
                     else -> Unit
                 }
             }
@@ -160,6 +168,8 @@ internal class TorrentDiagnostics : AlertListener {
             AlertType.METADATA_FAILED.swig(),
             AlertType.TORRENT_ERROR.swig(),
             AlertType.DHT_ERROR.swig(),
+            // Without this the catalogue branch in alert() never receives anything.
+            AlertType.DHT_MUTABLE_ITEM.swig(),
         )
     }
 }

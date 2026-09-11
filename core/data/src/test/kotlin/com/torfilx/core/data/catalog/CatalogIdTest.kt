@@ -1,7 +1,7 @@
 package com.torfilx.core.data.catalog
 
 import com.google.common.truth.Truth.assertThat
-import com.torfilx.core.torrent.MagnetLink
+import com.torfilx.core.model.MagnetLink
 import org.junit.Test
 
 /**
@@ -15,7 +15,7 @@ import org.junit.Test
  */
 class CatalogIdTest {
 
-    /** Mirrors the id rules in [BundledCatalog]: base id, then info hash, then position. */
+    /** Mirrors the id rules the catalogue parser applies (CatalogIds): base id, then info hash, then position. */
     private fun buildIds(entries: List<Pair<String, String?>>): List<String> {
         val used = HashSet<String>()
         return entries.mapIndexed { index, (base, infoHash) ->

@@ -2,21 +2,27 @@ package com.torfilx.core.data.settings
 
 import android.content.Context
 import androidx.datastore.core.DataStore
+import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
+import androidx.datastore.preferences.core.PreferenceDataStoreFactory
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
-import androidx.datastore.core.handlers.ReplaceFileCorruptionHandler
-import androidx.datastore.preferences.core.PreferenceDataStoreFactory
+import androidx.datastore.preferences.core.intPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStoreFile
 import com.torfilx.core.common.di.Dispatcher
 import com.torfilx.core.common.di.TorfilxDispatcher
 import com.torfilx.core.common.log.TorfilxLog
+import com.torfilx.core.data.catalog.CatalogueUpdatePrefs
+import com.torfilx.core.data.catalog.CatalogueUpdateRecord
+import com.torfilx.core.data.catalog.CatalogueUpdateSettings
+import com.torfilx.core.data.catalog.RejectedCatalogue
 import com.torfilx.core.model.AppSettings
 import com.torfilx.core.model.MetadataTimeout
-import com.torfilx.core.model.StreamingMode
 import com.torfilx.core.model.QualityPreference
+import com.torfilx.core.model.StreamingMode
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -24,6 +30,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.emitAll
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
@@ -34,9 +41,7 @@ import javax.inject.Singleton
 private const val TAG = "Settings"
 
 /**
- * User settings (plan.md §8.3).
- *
- * The API token is *not* stored here — it lives in [SecureTokenStore] so it is encrypted at rest.
+ * User settings (plan.md §8.3), plus the small record the catalogue updater keeps.
  *
  * Nothing here touches disk while the object is being constructed. Hilt builds this singleton on the
  * main thread inside `MainActivity.onCreate`, and opening a DataStore there cost a Fire OS 5 stick
@@ -47,15 +52,15 @@ private const val TAG = "Settings"
 class SettingsRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     @Dispatcher(TorfilxDispatcher.IO) private val ioDispatcher: CoroutineDispatcher,
-) {
+) : CatalogueUpdatePrefs {
 
     private val dataStore: DataStore<Preferences> by lazy {
         PreferenceDataStoreFactory.create(
             scope = CoroutineScope(ioDispatcher + SupervisorJob()),
-            // Without this a corrupt preferences file throws on every read AND write — the reads are
-            // caught below and fall back to defaults, but the writes were not, so the user could
-            // never change a setting again. Replacing the corrupt file with empty preferences turns
-            // a permanent lockout into a one-time reset to defaults.
+            // Without this a corrupt preferences file throws on every read AND write: the reads are
+            // caught below and fall back to defaults, but the writes were not, so the user could never
+            // change a setting again. Replacing the corrupt file with empty preferences turns a
+            // permanent lockout into a one-time reset to defaults.
             corruptionHandler = ReplaceFileCorruptionHandler { emptyPreferences() },
             produceFile = { context.preferencesDataStoreFile("torfilx_settings") },
         )
@@ -66,6 +71,9 @@ class SettingsRepository @Inject constructor(
      * thread. Every flow below is derived from this one.
      */
     private val preferences: Flow<Preferences> = flow { emitAll(dataStore.data) }
+
+    /** [preferences], falling back to defaults when the file cannot be read. */
+    private val safePreferences: Flow<Preferences> = preferences.catch { emit(emptyPreferences()) }
 
     private object Keys {
         val AUDIO_LANGUAGE = stringPreferencesKey("audio_language")
@@ -85,6 +93,14 @@ class SettingsRepository @Inject constructor(
         val METADATA_TIMEOUT = stringPreferencesKey("metadata_timeout")
         val STREAMING_MODE = stringPreferencesKey("streaming_mode")
         val FORCE_SOFTWARE_DECODER = booleanPreferencesKey("force_software_decoder")
+
+        // Catalogue updates over the peer network.
+        val CATALOG_UPDATES_ENABLED = booleanPreferencesKey("catalog_updates_enabled")
+        val CATALOG_LAST_CHECK_MS = longPreferencesKey("catalog_last_check_ms")
+        val CATALOG_LAST_RESULT = stringPreferencesKey("catalog_last_result")
+        val CATALOG_LAST_SUCCESS_MS = longPreferencesKey("catalog_last_success_ms")
+        val CATALOG_REJECTED_VERSION = longPreferencesKey("catalog_rejected_version")
+        val CATALOG_REJECTED_APP_VERSION = intPreferencesKey("catalog_rejected_app_version")
     }
 
     val settings: Flow<AppSettings> = preferences
@@ -125,25 +141,18 @@ class SettingsRepository @Inject constructor(
      * Whether the user has agreed to share (upload) while watching over BitTorrent.
      *
      * Default false, and nothing torrent-related runs until it is true: uploading redistributes
-     * whatever is being watched, which is the user.s call, not the app.s.
+     * whatever is being watched, which is the user's call, not the app's.
      */
-    val sharingConsent: Flow<Boolean> = preferences
-        .catch { emit(emptyPreferences()) }
-        .map { it[Keys.SHARING_CONSENT] ?: false }
+    val sharingConsent: Flow<Boolean> = safePreferences.map { it[Keys.SHARING_CONSENT] ?: false }
 
     /** True once the first-run sharing screen has been answered either way. */
-    val sharingConsentAnswered: Flow<Boolean> = preferences
-        .catch { emit(emptyPreferences()) }
-        .map { it[Keys.SHARING_CONSENT_SEEN] ?: false }
+    val sharingConsentAnswered: Flow<Boolean> = safePreferences.map { it[Keys.SHARING_CONSENT_SEEN] ?: false }
 
     /** Keep seeding after playback finishes, within the storage budget. */
-    val seedingEnabled: Flow<Boolean> = preferences
-        .catch { emit(emptyPreferences()) }
-        .map { it[Keys.SEEDING_ENABLED] ?: true }
+    val seedingEnabled: Flow<Boolean> = safePreferences.map { it[Keys.SEEDING_ENABLED] ?: true }
 
     /** Fraction of free space the torrent cache may use. */
-    val storageFraction: Flow<Float> = preferences
-        .catch { emit(emptyPreferences()) }
+    val storageFraction: Flow<Float> = safePreferences
         .map { it[Keys.STORAGE_FRACTION]?.toFloatOrNull() ?: DEFAULT_STORAGE_FRACTION }
 
     suspend fun setAudioLanguage(language: String?) = editNullable(Keys.AUDIO_LANGUAGE, language)
@@ -171,6 +180,48 @@ class SettingsRepository @Inject constructor(
     suspend fun setStreamingMode(mode: StreamingMode) = edit { it[Keys.STREAMING_MODE] = mode.name }
     suspend fun setForceSoftwareDecoder(enabled: Boolean) =
         edit { it[Keys.FORCE_SOFTWARE_DECODER] = enabled }
+
+    // --- Catalogue updates -----------------------------------------------------------------------
+
+    override val catalogUpdatesEnabled: Flow<Boolean> =
+        safePreferences.map { it[Keys.CATALOG_UPDATES_ENABLED] ?: true }
+
+    suspend fun setCatalogUpdatesEnabled(enabled: Boolean) = edit { it[Keys.CATALOG_UPDATES_ENABLED] = enabled }
+
+    override val catalogueUpdateRecord: Flow<CatalogueUpdateRecord> = safePreferences.map { prefs ->
+        CatalogueUpdateRecord(
+            lastCheckMs = prefs[Keys.CATALOG_LAST_CHECK_MS],
+            lastResult = prefs[Keys.CATALOG_LAST_RESULT],
+            lastSuccessMs = prefs[Keys.CATALOG_LAST_SUCCESS_MS],
+        )
+    }
+
+    override suspend fun catalogueUpdateSettings(): CatalogueUpdateSettings {
+        val prefs = safePreferences.first()
+        return CatalogueUpdateSettings(
+            updatesEnabled = prefs[Keys.CATALOG_UPDATES_ENABLED] ?: true,
+            sharingConsent = prefs[Keys.SHARING_CONSENT] ?: false,
+            useDht = prefs[Keys.USE_DHT] ?: true,
+        )
+    }
+
+    override suspend fun recordCatalogueCheck(atMs: Long, result: String, successful: Boolean) = edit { prefs ->
+        prefs[Keys.CATALOG_LAST_CHECK_MS] = atMs
+        prefs[Keys.CATALOG_LAST_RESULT] = result
+        if (successful) prefs[Keys.CATALOG_LAST_SUCCESS_MS] = atMs
+    }
+
+    override suspend fun recordRejectedCatalogue(version: Long, appVersionCode: Int) = edit { prefs ->
+        prefs[Keys.CATALOG_REJECTED_VERSION] = version
+        prefs[Keys.CATALOG_REJECTED_APP_VERSION] = appVersionCode
+    }
+
+    override suspend fun rejectedCatalogue(): RejectedCatalogue? {
+        val prefs = safePreferences.first()
+        val version = prefs[Keys.CATALOG_REJECTED_VERSION] ?: return null
+        val appVersionCode = prefs[Keys.CATALOG_REJECTED_APP_VERSION] ?: return null
+        return RejectedCatalogue(version, appVersionCode)
+    }
 
     // Synchronous snapshots for the torrent engine and player factory, which read configuration from
     // inside native callbacks and construction paths that cannot suspend. Kept current by the layer

@@ -69,8 +69,8 @@ fun HomeScreen(
 
             HomeUiState.EmptyCatalog -> EmptyState(
                 title = "Nothing to watch yet",
-                message = "The bundled catalogue has no playable titles. Check that catalog.json " +
-                    "contains valid magnet links.",
+                message = "The catalogue has no playable titles. With sharing on, the app looks for " +
+                    "the latest signed catalogue on the peer network.",
             )
 
             is HomeUiState.Content -> HomeContent(

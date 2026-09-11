@@ -19,3 +19,18 @@ hs_err_pid*.log
 **/hs_err_pid*.log
 replay_pid*.log
 **/replay_pid*.log
+
+# Catalogue releases built by tools/catalog-publisher. Public, signed data, but binary and
+# rebuildable; the publisher seed that signs them must never be anywhere in this repository.
+dist/catalogue/
+
+# The publisher seed itself (see docs/CATALOGUE_P2P.md), wherever it is generated. Whoever holds it
+# can sign a catalogue every TORFILX build trusts, so it must never be tracked, even by accident.
+*.seed
+
+# This repo is public. Internal working notes and generated reports that narrate how a feature was
+# built (bugs hit, local paths, in-progress reasoning) are not for the public repo, even though the
+# feature docs they inform (README.md, docs/CATALOGUE_P2P.md, TESTING_PLAN.md, docs/RELEASING.md)
+# are tracked as usual.
+next-build.md
+docs/*_IMPLEMENTATION_REPORT.md

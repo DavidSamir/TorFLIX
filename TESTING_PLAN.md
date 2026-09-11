@@ -213,3 +213,48 @@ Key lines and how to read them:
   are correct by source analysis but not yet playback-verified, so they have not been
   released.
 - The user's `core/data/src/main/assets/catalog.json` has **never been modified** (0 diffs).
+
+---
+
+## 9. Catalogue over the peer network (real hardware)
+
+Whether the emulator reaches the DHT depends on the host network (section 1 found no UDP; on 2026-09-12
+the development emulator reached 78 DHT nodes and completed a lookup), so the catalogue transport is
+proven two other ways: automatically, on a private libtorrent network on a desktop JVM with one
+process per session (`process/SwarmNetworkTest`, plus `SingleSessionTransportTest`), and by hand on
+a real Fire TV as below. See `docs/CATALOGUE_P2P.md` for the format and the tool.
+
+### Setup
+
+1. On a PC with working UDP, build and publish a test release from a test key:
+   ```
+   catalog-publisher keygen --out C:/keys/test-publisher.seed
+   catalog-publisher build --catalog core/data/src/main/assets/catalog.json --version 900 \
+     --seed C:/keys/test-publisher.seed --out build/catalogue-test
+   catalog-publisher publish --release build/catalogue-test/torfilx-catalogue-900 \
+     --seed C:/keys/test-publisher.seed --salt torfilx-catalog-v1 --hours 2
+   ```
+2. Install a debug build that trusts that key:
+   `./gradlew :app:installDebug -Ptorfilx.cataloguePublisherKeys=<printed public key>`
+3. `adb logcat -c`, open the app, turn on sharing.
+
+### Matrix
+
+| # | Action | Expected |
+| --- | --- | --- |
+| 1 | Wait 20 s after sharing turns on | `CatalogUpdate: Checking…`, then `Catalog: Catalogue 900 is now in use`; Movies header shows `catalogue 900` with no restart |
+| 2 | Force-stop and reopen | `Catalog: Using the downloaded catalogue 900 … verified`; still 900 |
+| 3 | Publish from a *different* seed under the same salt | Nothing changes: that pointer is under a key the build does not trust |
+| 4 | Settings → Use the built-in catalogue | Header back to the bundled version; the next check reports release 900 as refused |
+| 5 | Settings → Find peers with DHT off → Check for a new catalogue | "Turn on Find peers with DHT…", no lookup in the log |
+| 6 | Sharing off | Session stops; no `CatalogUpdate` lines at all |
+| 7 | Stop `publish` for 3 h, then Check | "No catalogue has been published…" (the pointer expired); the catalogue in use is kept |
+| 8 | Second launch of the day | `Torrent: DHT state restored from the last session`; the check finds nodes within seconds |
+| 9 | Press Home, wait 30 s, reopen the app, play a film | `Torrent session stopped`, then `Torrent session started` on return. If instead `libtorrent did not finish shutting down within 20 s` appears, the next start may log `still shutting down; not starting a new one yet`; a retry a few seconds later must work and the app must never freeze |
+
+### Reading a failure
+
+- `DHT found no nodes` on hardware: UDP is blocked on that network, exactly as for films.
+- `NOT_FOUND` with nodes > 0: the publisher was not running in the last two hours, or keys differ.
+- `NO_PEERS`: the pointer resolved but nobody seeded the torrent; keep `publish` running.
+- `REJECTED (BAD_SIGNATURE)`: the release was built with a different seed than the pointer's key.
