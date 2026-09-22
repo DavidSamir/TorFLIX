@@ -8,7 +8,11 @@ import com.torfilx.core.catalogue.testing.TestCatalogues
 import com.torfilx.core.data.repository.MediaRepository
 import com.torfilx.core.data.repository.MyListRepository
 import com.torfilx.core.data.repository.ProgressRepository
+import com.torfilx.core.data.settings.LibraryDefaults
+import com.torfilx.core.data.settings.LibraryPreferences
+import com.torfilx.core.model.LibrarySort
 import com.torfilx.core.model.MediaKind
+import com.torfilx.core.model.WatchedFilter
 import com.torfilx.core.testing.FakeMyListDao
 import com.torfilx.core.testing.FakeProgressDao
 import com.torfilx.core.testing.FakeShowStateDao
@@ -18,6 +22,7 @@ import com.torfilx.core.testing.MainDispatcherRule
 import com.torfilx.core.testing.inMemoryCatalog
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.test.runTest
 import org.junit.Rule
 import org.junit.Test
@@ -40,7 +45,7 @@ class LibraryViewModelTest {
     private val showId = entries[2].id!!
     private val myListDao = FakeMyListDao()
 
-    private fun viewModel(mode: LibraryMode): LibraryViewModel {
+    private fun viewModel(mode: LibraryMode, defaults: LibraryDefaults = LibraryDefaults()): LibraryViewModel {
         val catalog = inMemoryCatalog(entries, tmp.root)
         val time = FakeTimeProvider()
         val progress = ProgressRepository(FakeProgressDao(), catalog, time, FakeShowStateDao())
@@ -50,6 +55,9 @@ class LibraryViewModelTest {
             mediaRepository = MediaRepository(catalog, FakeSearchHistoryDao(), progress, myList, time, main.dispatcher),
             progressRepository = progress,
             myListRepository = myList,
+            libraryPreferences = object : LibraryPreferences {
+                override val libraryDefaults = flowOf(defaults)
+            },
         )
     }
 
@@ -88,6 +96,22 @@ class LibraryViewModelTest {
         vm.setMode(LibraryMode.SHOWS)
         val state = vm.uiState.first { it.mode == LibraryMode.SHOWS && it.genres == listOf("Sci-Fi") }
         assertThat(state.query.genre).isNull()
+    }
+
+    @Test
+    fun `the grids open with the stored sort, and on unwatched titles when watched ones are hidden`() = runTest {
+        val defaults = LibraryDefaults(sort = LibrarySort.ALPHABETICAL, hideWatched = true)
+        val movies = viewModel(LibraryMode.MOVIES, defaults).loaded()
+        assertThat(movies.query.sort).isEqualTo(LibrarySort.ALPHABETICAL)
+        assertThat(movies.query.watched).isEqualTo(WatchedFilter.UNWATCHED)
+    }
+
+    @Test
+    fun `My List keeps watched titles even when they are hidden elsewhere`() = runTest {
+        val vm = viewModel(LibraryMode.MY_LIST, LibraryDefaults(sort = LibrarySort.YEAR, hideWatched = true))
+        val state = vm.uiState.first { !it.isLoading }
+        assertThat(state.query.sort).isEqualTo(LibrarySort.YEAR)
+        assertThat(state.query.watched).isEqualTo(WatchedFilter.ALL)
     }
 
     @Test

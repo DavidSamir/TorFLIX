@@ -34,6 +34,7 @@ import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.torfilx.core.model.MediaCard
 import com.torfilx.core.ui.image.Artwork
+import com.torfilx.core.ui.theme.LocalReduceMotion
 import com.torfilx.core.ui.theme.LocalTorfilxDimens
 import com.torfilx.core.ui.theme.TorfilxColors
 import com.torfilx.core.ui.util.Format
@@ -64,9 +65,12 @@ fun HeroSection(
     var index by remember(items.size) { mutableIntStateOf(0) }
     var userInteracted by remember { mutableStateOf(false) }
     var hasFocus by remember { mutableStateOf(false) }
+    // Reduce motion: the banner holds still, and a change of title is a cut rather than a crossfade.
+    val reduceMotion = LocalReduceMotion.current
+    val crossfadeMs = if (reduceMotion) 0 else CROSSFADE_MS
 
-    LaunchedEffect(items.size, userInteracted, hasFocus) {
-        if (items.size <= 1 || userInteracted || hasFocus) return@LaunchedEffect
+    LaunchedEffect(items.size, userInteracted, hasFocus, reduceMotion) {
+        if (items.size <= 1 || userInteracted || hasFocus || reduceMotion) return@LaunchedEffect
         while (true) {
             delay(AUTO_ADVANCE_MS)
             index = (index + 1) % items.size
@@ -88,7 +92,7 @@ fun HeroSection(
         AnimatedContent(
             targetState = current,
             transitionSpec = {
-                fadeIn(tween(CROSSFADE_MS)) togetherWith fadeOut(tween(CROSSFADE_MS))
+                fadeIn(tween(crossfadeMs)) togetherWith fadeOut(tween(crossfadeMs))
             },
             label = "heroBackdrop",
         ) { card ->

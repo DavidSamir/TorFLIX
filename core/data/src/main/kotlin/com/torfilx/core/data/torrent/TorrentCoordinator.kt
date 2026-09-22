@@ -75,13 +75,19 @@ class TorrentCoordinator @Inject constructor(
             }
             .launchIn(scope)
 
-        // Keep the engine's synchronous config snapshot current. These take effect on the next play;
-        // they are not applied mid-stream because they change how a session is built.
+        // Keep the engine's synchronous config snapshot current. The peer-discovery settings take
+        // effect on the next play, because they change how a session is built. The upload cap is
+        // applied to the running session at once.
         settingsRepository.settings
             .onEach { s ->
                 settingsRepository.cachedUseDht = s.useDht
                 settingsRepository.cachedUseExtraTrackers = s.useExtraTrackers
                 settingsRepository.cachedMetadataTimeoutSeconds = s.metadataTimeout.seconds
+                val uploadLimit = s.uploadLimit.bytesPerSecond
+                if (settingsRepository.cachedUploadLimitBytes != uploadLimit) {
+                    settingsRepository.cachedUploadLimitBytes = uploadLimit
+                    libTorrentEngine.onUploadLimitChanged()
+                }
             }
             .launchIn(scope)
 
@@ -249,6 +255,7 @@ class SettingsTorrentConfigProvider @Inject constructor(
     override fun useDht(): Boolean = settingsRepository.cachedUseDht
     override fun useExtraTrackers(): Boolean = settingsRepository.cachedUseExtraTrackers
     override fun metadataTimeoutMs(): Long = settingsRepository.cachedMetadataTimeoutSeconds * 1000L
+    override fun uploadRateLimitBytes(): Int = settingsRepository.cachedUploadLimitBytes
 }
 
 @Module

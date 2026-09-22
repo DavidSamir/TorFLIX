@@ -1,7 +1,5 @@
 package com.torfilx.core.ui.component
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -44,7 +42,7 @@ import com.torfilx.core.model.ResumeRules
 import com.torfilx.core.model.Season
 import com.torfilx.core.ui.focus.onMenuKey
 import com.torfilx.core.ui.image.Artwork
-import com.torfilx.core.ui.theme.FOCUS_ANIMATION_MS
+import com.torfilx.core.ui.theme.animateFocusScale
 import com.torfilx.core.ui.theme.LocalTorfilxDimens
 import com.torfilx.core.ui.theme.TorfilxColors
 import com.torfilx.core.ui.util.Format
@@ -113,11 +111,7 @@ fun EpisodeRow(
     val dimens = LocalTorfilxDimens.current
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (focused) EPISODE_FOCUS_SCALE else 1f,
-        animationSpec = tween(FOCUS_ANIMATION_MS),
-        label = "episodeScale",
-    )
+    val scale by animateFocusScale(focused, focusedScale = EPISODE_FOCUS_SCALE, label = "episodeScale")
     val watched = progress?.let(ResumeRules::isWatched) == true
     val shape = RoundedCornerShape(dimens.cornerRadius)
     val description = remember(episode, progress) { episode.accessibilityDescription(progress) }

@@ -31,7 +31,7 @@ class EpisodeAutoplayTest {
     private val seasons = listOf(Season(1, "Season 1", episodes = listOf(e1, e2, e3, e4, e5)))
 
     /** Plays the role of the controller: holds the card, records what was played and asked. */
-    private class Harness(scope: TestScope) {
+    private class Harness(scope: TestScope, countdownSeconds: () -> Int) {
         var card: EndCard? = null
         var askedStillWatching = 0
         val played = mutableListOf<Pair<String, Long?>>()
@@ -46,12 +46,14 @@ class EpisodeAutoplayTest {
                 card = null
                 played += id to start
             },
+            countdownSeconds = countdownSeconds,
             warm = { warmed += it.id },
             coolDown = { cooled++ },
         )
     }
 
-    private fun TestScope.harness() = Harness(this)
+    private fun TestScope.harness(countdownSeconds: () -> Int = { EpisodeAutoplay.COUNTDOWN_SECONDS }) =
+        Harness(this, countdownSeconds)
 
     /** Lets every countdown run out. The countdown lives in `backgroundScope`, which `advanceUntilIdle` does not wait for. */
     private fun TestScope.idle() {
@@ -73,6 +75,34 @@ class EpisodeAutoplayTest {
 
         idle()
         assertThat(h.played).containsExactly(e2.id to null)
+        assertThat(h.autoplay.unattendedAutoplays).isEqualTo(1)
+    }
+
+    @Test
+    fun `the countdown runs for as long as the setting says, read when it starts`() = runTest {
+        var seconds = 5
+        val h = harness { seconds }
+        h.autoplay.onEpisodeEnded(seasons, e1, autoplay = true, showTitle = "Show")
+        runCurrent()
+        assertThat(h.card).isEqualTo(EndCard.Countdown(e2, 5))
+        seconds = 20 // a change mid-countdown waits for the next one
+
+        advanceTimeBy(5_001)
+        runCurrent()
+        assertThat(h.played).containsExactly(e2.id to null)
+
+        h.autoplay.onEpisodeEnded(seasons, e2, autoplay = true, showTitle = "Show")
+        runCurrent()
+        assertThat(h.card).isEqualTo(EndCard.Countdown(e3, 20))
+    }
+
+    @Test
+    fun `an instant countdown plays on without showing a card, and still counts as unattended`() = runTest {
+        val h = harness { 0 }
+        h.autoplay.onEpisodeEnded(seasons, e1, autoplay = true, showTitle = "Show")
+        runCurrent()
+        assertThat(h.played).containsExactly(e2.id to null)
+        assertThat(h.card).isNull()
         assertThat(h.autoplay.unattendedAutoplays).isEqualTo(1)
     }
 

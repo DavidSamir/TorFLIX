@@ -1,8 +1,10 @@
 package com.torfilx.feature.player
 
 import android.app.Activity
+import android.graphics.Color
 import android.view.WindowManager
 import androidx.activity.compose.BackHandler
+import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Arrangement
@@ -39,14 +41,20 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.CaptionStyleCompat
 import androidx.media3.ui.PlayerView
+import androidx.media3.ui.SubtitleView
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import com.torfilx.core.model.SubtitleSize
+import com.torfilx.core.model.SubtitleStyle
 import com.torfilx.core.player.AspectMode
 import com.torfilx.core.player.EndCard
 import com.torfilx.core.player.PlaybackError
 import com.torfilx.core.player.PlayerUiState
+import com.torfilx.core.player.StreamStats
 import com.torfilx.core.ui.component.ErrorState
 import com.torfilx.core.ui.component.NextEpisodeCard
 import com.torfilx.core.ui.component.SharingConsentDialog
@@ -85,6 +93,9 @@ fun PlayerScreen(
     val pendingSeek by viewModel.pendingSeekMs.collectAsStateWithLifecycle()
     val displaySwitching by viewModel.displaySwitching.collectAsStateWithLifecycle()
     val autoSkipIntro by viewModel.skipIntroAutomatically.collectAsStateWithLifecycle()
+    val prefs by viewModel.preferences.collectAsStateWithLifecycle()
+    val seekStepMs = prefs.seekStep.ms
+    val longSeekStepMs = seekStepMs * LONG_SEEK_MULTIPLIER
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
     val rootFocus = remember { FocusRequester() }
@@ -173,20 +184,20 @@ fun PlayerScreen(
                     // whatever control is focused — moving between the buttons, or scrubbing when the
                     // timeline itself holds focus — so the root must not swallow them.
                     RemoteKeys.LEFT -> {
-                        if (controlsVisible) false else { viewModel.nudgeSeek(-SEEK_STEP_MS); true }
+                        if (controlsVisible) false else { viewModel.nudgeSeek(-seekStepMs); true }
                     }
 
                     RemoteKeys.RIGHT -> {
-                        if (controlsVisible) false else { viewModel.nudgeSeek(SEEK_STEP_MS); true }
+                        if (controlsVisible) false else { viewModel.nudgeSeek(seekStepMs); true }
                     }
 
                     // The remote's dedicated transport keys always seek, overlay or not.
                     RemoteKeys.REWIND -> {
-                        viewModel.nudgeSeek(-LONG_SEEK_STEP_MS); true
+                        viewModel.nudgeSeek(-longSeekStepMs); true
                     }
 
                     RemoteKeys.FAST_FORWARD -> {
-                        viewModel.nudgeSeek(LONG_SEEK_STEP_MS); true
+                        viewModel.nudgeSeek(longSeekStepMs); true
                     }
 
                     RemoteKeys.PLAY_PAUSE, RemoteKeys.PLAY, RemoteKeys.PAUSE -> {
@@ -211,7 +222,12 @@ fun PlayerScreen(
                 }
             },
     ) {
-        VideoSurface(viewModel = viewModel, aspectMode = state.aspectMode)
+        VideoSurface(
+            viewModel = viewModel,
+            aspectMode = state.aspectMode,
+            subtitleSize = prefs.subtitleSize,
+            subtitleStyle = prefs.subtitleStyle,
+        )
 
         // While the TV renegotiates HDMI after a refresh-rate switch it shows garbage; cover it.
         if (displaySwitching) {
@@ -291,6 +307,19 @@ fun PlayerScreen(
             return@Box
         }
 
+        // Opt-in, and only once there is something to report. Top right, clear of the controls, the
+        // skip button and the end card.
+        val stream = state.stream
+        if (prefs.showStreamStats && stream != null && !state.isLoading) {
+            StreamStatsOverlay(
+                stream = stream,
+                bufferedAheadMs = state.bufferedAheadMs,
+                modifier = Modifier
+                    .align(Alignment.TopEnd)
+                    .padding(top = 32.dp, end = 48.dp),
+            )
+        }
+
         if (state.showSkipIntro) {
             TvButton(
                 text = "Skip intro",
@@ -306,6 +335,7 @@ fun PlayerScreen(
             PlayerControls(
                 state = state,
                 pendingSeekMs = pendingSeek,
+                seekStepMs = seekStepMs,
                 onPlayPause = viewModel::togglePlayPause,
                 onNudgeSeek = viewModel::nudgeSeek,
                 onRestart = { viewModel.seekTo(0) },
@@ -323,8 +353,14 @@ fun PlayerScreen(
     }
 }
 
+@OptIn(UnstableApi::class)
 @Composable
-private fun VideoSurface(viewModel: PlayerViewModel, aspectMode: AspectMode) {
+private fun VideoSurface(
+    viewModel: PlayerViewModel,
+    aspectMode: AspectMode,
+    subtitleSize: SubtitleSize,
+    subtitleStyle: SubtitleStyle,
+) {
     // Observed, not read once: when the player instance changes between titles the surface must
     // re-attach, or the next title plays with a black screen.
     val player by viewModel.playerFlow.collectAsStateWithLifecycle()
@@ -345,10 +381,83 @@ private fun VideoSurface(viewModel: PlayerViewModel, aspectMode: AspectMode) {
                 AspectMode.FILL -> AspectRatioFrameLayout.RESIZE_MODE_FILL
                 AspectMode.ZOOM -> AspectRatioFrameLayout.RESIZE_MODE_ZOOM
             }
+            view.subtitleView?.applySubtitleLook(subtitleSize, subtitleStyle)
         },
         onReset = { view -> view.player = null },
     )
 }
+
+/**
+ * Applies the subtitle size and colours from Settings.
+ *
+ * "TV default" hands both back to the TV's own caption settings, which is what PlayerView does on its
+ * own. An explicit size also stops a subtitle file's own sizes from overriding it: the viewer asked
+ * for large text, so a file asking for small text should not win.
+ */
+@OptIn(UnstableApi::class)
+private fun SubtitleView.applySubtitleLook(size: SubtitleSize, style: SubtitleStyle) {
+    if (size == SubtitleSize.TV_DEFAULT) {
+        setUserDefaultTextSize()
+        setApplyEmbeddedFontSizes(true)
+    } else {
+        setFractionalTextSize(SubtitleView.DEFAULT_TEXT_SIZE_FRACTION * size.scale)
+        setApplyEmbeddedFontSizes(false)
+    }
+    when (style) {
+        SubtitleStyle.TV_DEFAULT -> setUserDefaultStyle()
+        SubtitleStyle.OUTLINED -> setStyle(captionStyle(foreground = Color.WHITE, background = Color.TRANSPARENT))
+        SubtitleStyle.BOXED -> setStyle(
+            captionStyle(foreground = Color.WHITE, background = BOXED_BACKGROUND, edge = CaptionStyleCompat.EDGE_TYPE_NONE),
+        )
+        SubtitleStyle.YELLOW -> setStyle(captionStyle(foreground = Color.YELLOW, background = Color.TRANSPARENT))
+    }
+}
+
+@OptIn(UnstableApi::class)
+private fun captionStyle(
+    foreground: Int,
+    background: Int,
+    edge: Int = CaptionStyleCompat.EDGE_TYPE_OUTLINE,
+) = CaptionStyleCompat(
+    foreground,
+    background,
+    /* windowColor = */ Color.TRANSPARENT,
+    edge,
+    /* edgeColor = */ Color.BLACK,
+    /* typeface = */ null,
+)
+
+/** Black at 80%: dark enough to read over snow, light enough to keep the picture behind it. */
+private const val BOXED_BACKGROUND = 0xCC000000.toInt()
+
+/**
+ * The opt-in "stats for nerds" line: what the swarm is doing for the title on screen.
+ *
+ * Deliberately one small line of text, not a panel: it is on screen for the whole film.
+ */
+@Composable
+private fun StreamStatsOverlay(stream: StreamStats, bufferedAheadMs: Long, modifier: Modifier = Modifier) {
+    val text = buildString {
+        append("↓ ").append(Format.speed(stream.downloadBytesPerSecond))
+        append("  ↑ ").append(Format.speed(stream.uploadBytesPerSecond))
+        append("  ·  ").append(stream.peers).append(" peers")
+        if (stream.seeds > 0) append(" (").append(stream.seeds).append(" seeds)")
+        append("  ·  ").append((stream.progress * PERCENT).toInt()).append("% downloaded")
+        val ahead = bufferedAheadMs / MS_PER_SECOND
+        if (ahead > 0) append("  ·  ").append(ahead).append(" s buffered")
+    }
+    Text(
+        text = text,
+        style = MaterialTheme.typography.labelMedium,
+        color = TorfilxColors.TextSecondary,
+        modifier = modifier
+            .background(TorfilxColors.ScrimStrong)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    )
+}
+
+private const val PERCENT = 100
+private const val MS_PER_SECOND = 1_000L
 
 /**
  * The spinner only appears after a short delay: on a LAN most rebuffers are shorter than that, and a
@@ -573,6 +682,7 @@ private fun StillWatchingOverlay(onContinue: () -> Unit, onStop: () -> Unit) {
 private fun PlayerControls(
     state: PlayerUiState,
     pendingSeekMs: Long?,
+    seekStepMs: Long,
     onPlayPause: () -> Unit,
     onNudgeSeek: (Long) -> Unit,
     onRestart: () -> Unit,
@@ -626,6 +736,7 @@ private fun PlayerControls(
             durationMs = state.durationMs,
             isScrubbing = pendingSeekMs != null,
             focusRequester = scrubberFocus,
+            stepMs = seekStepMs,
             onNudgeSeek = onNudgeSeek,
         )
 
@@ -730,6 +841,7 @@ private fun ScrubBar(
     durationMs: Long,
     isScrubbing: Boolean,
     focusRequester: FocusRequester,
+    stepMs: Long,
     onNudgeSeek: (Long) -> Unit,
 ) {
     val fraction = if (durationMs > 0) (positionMs.toFloat() / durationMs).coerceIn(0f, 1f) else 0f
@@ -754,8 +866,8 @@ private fun ScrubBar(
             .onRemoteKey { key, isKeyDown, _ ->
                 if (!isKeyDown) return@onRemoteKey false
                 when (key) {
-                    RemoteKeys.LEFT -> { onNudgeSeek(-SEEK_STEP_MS); true }
-                    RemoteKeys.RIGHT -> { onNudgeSeek(SEEK_STEP_MS); true }
+                    RemoteKeys.LEFT -> { onNudgeSeek(-stepMs); true }
+                    RemoteKeys.RIGHT -> { onNudgeSeek(stepMs); true }
                     else -> false // ↑/↓ move focus to the buttons; OK/Back handled by the root
                 }
             },
@@ -835,8 +947,8 @@ private fun Float.nextSpeed(): Float = when (this) {
     else -> 1f
 }
 
-private const val SEEK_STEP_MS = 10_000L
-private const val LONG_SEEK_STEP_MS = 30_000L
+/** Rewind and fast-forward jump this many ←/→ steps at once. With the default 10 s step, 30 s as before. */
+private const val LONG_SEEK_MULTIPLIER = 3
 
 private fun PlaybackError.isRetryable(): Boolean = when (this) {
     is PlaybackError.Unsupported, is PlaybackError.SharingNotEnabled -> false

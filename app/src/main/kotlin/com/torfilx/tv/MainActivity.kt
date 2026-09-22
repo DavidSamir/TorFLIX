@@ -5,6 +5,8 @@ import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.torfilx.core.common.log.TorfilxLog
 import com.torfilx.core.data.settings.SettingsRepository
@@ -14,6 +16,8 @@ import com.torfilx.core.player.service.PlaybackService
 import com.torfilx.core.ui.theme.TorfilxTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 
 private const val TAG = "MainActivity"
@@ -54,8 +58,13 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         TorfilxLog.debugEnabled = BuildConfig.DEBUG
 
+        // Collected on IO: the settings store must never be opened on the main thread during
+        // onCreate (see SettingsRepository). The first frame draws with motion on, then follows the
+        // stored choice a moment later.
+        val reduceMotionFlow = settingsRepository.reduceMotion.flowOn(Dispatchers.IO)
         setContent {
-            TorfilxTheme {
+            val reduceMotion by reduceMotionFlow.collectAsState(initial = false)
+            TorfilxTheme(reduceMotion = reduceMotion) {
                 TorfilxApp(onExitApp = { finish() })
             }
         }

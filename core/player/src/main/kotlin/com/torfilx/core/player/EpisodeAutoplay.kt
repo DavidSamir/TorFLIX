@@ -28,7 +28,8 @@ internal class EpisodeAutoplay(
     private val setCard: (EndCard?) -> Unit,
     private val askStillWatching: () -> Unit,
     private val advance: (playableId: String, startPositionMs: Long?) -> Unit,
-    private val countdownSeconds: Int = COUNTDOWN_SECONDS,
+    /** Read each time a countdown starts, so a changed setting applies to the next one. 0 plays on at once. */
+    private val countdownSeconds: () -> Int = { COUNTDOWN_SECONDS },
     private val warm: (Episode) -> Unit = {},
     private val coolDown: () -> Unit = {},
 ) {
@@ -136,8 +137,9 @@ internal class EpisodeAutoplay(
     private fun startCountdown(next: Episode) {
         cancelCountdown()
         warm(next)
+        val total = countdownSeconds().coerceAtLeast(0)
         val job = scope.launch {
-            for (seconds in countdownSeconds downTo 1) {
+            for (seconds in total downTo 1) {
                 setCard(EndCard.Countdown(next, seconds))
                 delay(MS_PER_SECOND)
             }

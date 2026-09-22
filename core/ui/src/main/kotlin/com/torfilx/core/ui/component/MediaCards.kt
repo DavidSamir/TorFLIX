@@ -1,7 +1,5 @@
 package com.torfilx.core.ui.component
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -36,8 +34,7 @@ import androidx.tv.material3.Text
 import com.torfilx.core.model.MediaCard
 import com.torfilx.core.ui.focus.onMenuKey
 import com.torfilx.core.ui.image.Artwork
-import com.torfilx.core.ui.theme.FOCUS_ANIMATION_MS
-import com.torfilx.core.ui.theme.FOCUS_SCALE
+import com.torfilx.core.ui.theme.animateFocusScale
 import com.torfilx.core.ui.theme.LocalTorfilxDimens
 import com.torfilx.core.ui.theme.TorfilxColors
 import com.torfilx.core.ui.util.Format
@@ -111,11 +108,7 @@ private fun FocusableMediaCard(
     val dimens = LocalTorfilxDimens.current
     val source = interactionSource ?: remember { MutableInteractionSource() }
     val isFocused by source.collectIsFocusedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isFocused) FOCUS_SCALE else 1f,
-        animationSpec = tween(FOCUS_ANIMATION_MS),
-        label = "cardScale",
-    )
+    val scale by animateFocusScale(isFocused, label = "cardScale")
 
     val shape = RoundedCornerShape(dimens.cornerRadius)
     val description = remember(card, isFocused) { card.accessibilityDescription() }

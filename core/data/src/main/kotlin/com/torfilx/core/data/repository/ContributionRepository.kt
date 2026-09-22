@@ -6,12 +6,14 @@ import com.torfilx.core.common.di.TorfilxDispatcher
 import com.torfilx.core.common.log.TorfilxLog
 import com.torfilx.core.data.database.ContributionDao
 import com.torfilx.core.model.DailyContribution
+import com.torfilx.core.model.StreamedTotals
 import com.torfilx.core.model.TitleContribution
 import com.torfilx.core.model.contributionDelta
 import com.torfilx.core.torrent.TorrentStatus
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -169,6 +171,17 @@ class ContributionRepository @Inject constructor(
     fun daily(nowMs: Long, days: Int = CHART_DAYS): Flow<List<DailyContribution>> =
         dao.observeDaysSince(localEpochDay(nowMs) - days + 1).map { rows ->
             rows.map { DailyContribution(it.epochDay, it.uploadedBytes, it.downloadedBytes) }
+        }
+
+    /**
+     * Streamed in and out today, over the last 30 days, and since the record was last cleared.
+     *
+     * Follows the database, so it moves when [flush] writes: every [FLUSH_INTERVAL_MS] while
+     * something is streaming or seeding.
+     */
+    fun streamedTotals(nowMs: Long): Flow<StreamedTotals> =
+        combine(daily(nowMs, CHART_DAYS), contributions) { days, titles ->
+            StreamedTotals.from(days, titles, todayEpochDay = localEpochDay(nowMs))
         }
 
     /** Erases the whole record. Wired to "Clear data" — a log of what you seeded must be erasable. */

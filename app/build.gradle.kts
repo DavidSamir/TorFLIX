@@ -32,8 +32,8 @@ android {
 
     defaultConfig {
         applicationId = "com.torfilx.tv"
-        versionCode = 17
-        versionName = "0.2.7"
+        versionCode = 18
+        versionName = "0.3.0"
         testInstrumentationRunner = "com.torfilx.tv.HiltTestRunner"
         resourceConfigurations += setOf("en")
     }

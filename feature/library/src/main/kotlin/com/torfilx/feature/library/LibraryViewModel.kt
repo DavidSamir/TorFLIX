@@ -8,6 +8,8 @@ import com.torfilx.core.common.log.TorfilxLog
 import com.torfilx.core.data.repository.MediaRepository
 import com.torfilx.core.data.repository.MyListRepository
 import com.torfilx.core.data.repository.ProgressRepository
+import com.torfilx.core.data.settings.LibraryDefaults
+import com.torfilx.core.data.settings.LibraryPreferences
 import com.torfilx.core.model.LibraryQuery
 import com.torfilx.core.model.LibrarySort
 import com.torfilx.core.model.MediaCard
@@ -20,8 +22,11 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -59,19 +64,26 @@ class LibraryViewModel @Inject constructor(
     private val mediaRepository: MediaRepository,
     private val progressRepository: ProgressRepository,
     private val myListRepository: MyListRepository,
+    private val libraryPreferences: LibraryPreferences,
 ) : ViewModel() {
 
     private val mode = MutableStateFlow(
         savedStateHandle.get<String>(ARG_MODE)?.let { runCatching { LibraryMode.valueOf(it) }.getOrNull() }
             ?: LibraryMode.MOVIES,
     )
-    private val query = MutableStateFlow(LibraryQuery())
+    /**
+     * Null until the stored defaults (sort, hide watched) have been read. Nothing is listed before
+     * then: a grid drawn in the default order and re-sorted a moment later moves the card under the
+     * viewer's focus.
+     */
+    private val query = MutableStateFlow<LibraryQuery?>(null)
+    private val shownQuery = query.filterNotNull()
     private val genres = MutableStateFlow<List<String>>(emptyList())
     private val loading = MutableStateFlow(true)
     private val errorMessage = MutableStateFlow<String?>(null)
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    private val cards = combine(mode, query) { currentMode, currentQuery ->
+    private val cards = combine(mode, shownQuery) { currentMode, currentQuery ->
         currentMode to currentQuery
     }.flatMapLatest { (currentMode, effectiveQuery) ->
         val source = mediaRepository.observeLibrary(effectiveQuery.copy(kind = currentMode.kind))
@@ -88,7 +100,7 @@ class LibraryViewModel @Inject constructor(
         mode,
         cards,
         genres,
-        query,
+        shownQuery,
         combine(loading, errorMessage, mediaRepository.observeCatalogue()) { isLoading, error, catalogue ->
             Triple(isLoading, error, catalogue.version)
         },
@@ -105,6 +117,23 @@ class LibraryViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), LibraryUiState())
 
     init {
+        // Start from the stored defaults. A change the viewer already made on screen wins, which can
+        // only happen if the settings store is very slow to answer. Hiding watched titles is for the
+        // Movies and Shows grids: My List is a list the viewer built on purpose, watched or not.
+        viewModelScope.launch {
+            // Unreadable settings must not leave the grid empty forever: fall back to the built-in order.
+            val defaults = runCatching { libraryPreferences.libraryDefaults.first() }
+                .onFailure { TorfilxLog.w(TAG, "Library defaults unreadable, using built-in ones", it) }
+                .getOrDefault(LibraryDefaults())
+            val hideWatched = defaults.hideWatched && mode.value != LibraryMode.MY_LIST
+            query.compareAndSet(
+                null,
+                LibraryQuery(
+                    sort = defaults.sort,
+                    watched = if (hideWatched) WatchedFilter.UNWATCHED else WatchedFilter.ALL,
+                ),
+            )
+        }
         // Genres come from the catalogue in use and the tab's kind, so they are read again whenever a
         // newer catalogue is swapped in or the mode changes; a genre chip must never offer a genre the
         // grid does not have. A genre the new list lacks is cleared rather than left filtering to nothing.
@@ -116,7 +145,7 @@ class LibraryViewModel @Inject constructor(
                 .collect { currentMode ->
                     val available = mediaRepository.genres(currentMode.kind)
                     genres.value = available
-                    query.value.genre?.let { chosen -> if (chosen !in available) setGenre(null) }
+                    query.value?.genre?.let { chosen -> if (chosen !in available) setGenre(null) }
                 }
         }
         refresh()
@@ -126,16 +155,14 @@ class LibraryViewModel @Inject constructor(
         mode.value = newMode
     }
 
-    fun setSort(sort: LibrarySort) {
-        query.value = query.value.copy(sort = sort)
-    }
+    fun setSort(sort: LibrarySort) = updateQuery { it.copy(sort = sort) }
 
-    fun setGenre(genre: String?) {
-        query.value = query.value.copy(genre = genre)
-    }
+    fun setGenre(genre: String?) = updateQuery { it.copy(genre = genre) }
 
-    fun setWatchedFilter(filter: WatchedFilter) {
-        query.value = query.value.copy(watched = filter)
+    fun setWatchedFilter(filter: WatchedFilter) = updateQuery { it.copy(watched = filter) }
+
+    private fun updateQuery(change: (LibraryQuery) -> LibraryQuery) {
+        query.update { current -> change(current ?: LibraryQuery()) }
     }
 
     fun toggleMyList(card: MediaCard) {

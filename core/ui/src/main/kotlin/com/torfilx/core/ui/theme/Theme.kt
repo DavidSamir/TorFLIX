@@ -128,11 +128,15 @@ const val FOCUS_ANIMATION_MS = 160
 @Composable
 fun TorfilxTheme(
     dimens: TorfilxDimens = TorfilxDimens(),
+    reduceMotion: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     // The app is dark-only by design: a bright UI in a dark room is hostile, and a TV is watched in
     // the dark. The system light/dark setting is intentionally not consulted.
-    CompositionLocalProvider(LocalTorfilxDimens provides dimens) {
+    CompositionLocalProvider(
+        LocalTorfilxDimens provides dimens,
+        LocalReduceMotion provides reduceMotion,
+    ) {
         MaterialTheme(
             colorScheme = TorfilxColorScheme,
             typography = TorfilxTypography,

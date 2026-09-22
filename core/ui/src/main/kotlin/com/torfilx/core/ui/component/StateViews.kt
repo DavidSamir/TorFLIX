@@ -30,8 +30,12 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import com.torfilx.core.ui.theme.LocalReduceMotion
 import com.torfilx.core.ui.theme.LocalTorfilxDimens
 import com.torfilx.core.ui.theme.TorfilxColors
+
+/** Midway through the pulse, so a still placeholder looks the same as a moving one on average. */
+private const val SKELETON_STATIC_ALPHA = 0.5f
 
 /**
  * Skeleton placeholder.
@@ -45,13 +49,19 @@ fun SkeletonBox(
     height: Dp,
     modifier: Modifier = Modifier,
 ) {
-    val transition = rememberInfiniteTransition(label = "skeleton")
-    val alpha by transition.animateFloat(
-        initialValue = 0.35f,
-        targetValue = 0.65f,
-        animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
-        label = "skeletonAlpha",
-    )
+    // A pulse redraws every frame for as long as a row is loading; with reduce motion it holds still.
+    val alpha = if (LocalReduceMotion.current) {
+        SKELETON_STATIC_ALPHA
+    } else {
+        val transition = rememberInfiniteTransition(label = "skeleton")
+        val pulse by transition.animateFloat(
+            initialValue = 0.35f,
+            targetValue = 0.65f,
+            animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
+            label = "skeletonAlpha",
+        )
+        pulse
+    }
     Box(
         modifier = modifier
             .width(width)

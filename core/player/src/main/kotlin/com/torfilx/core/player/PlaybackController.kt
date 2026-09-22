@@ -150,6 +150,8 @@ class PlaybackController @Inject constructor(
         setCard = { card -> _state.update { it.copy(endCard = card) } },
         askStillWatching = { _state.update { it.copy(showStillWatching = true) } },
         advance = ::advanceTo,
+        // Read when a countdown starts, from the settings the title was opened with.
+        countdownSeconds = { settings.autoplayCountdown.seconds },
         warm = { next -> warmer.warm(next.id) },
         coolDown = { warmer.coolDown() },
     )
@@ -300,10 +302,12 @@ class PlaybackController @Inject constructor(
             if (disableTunnelingForSession) stored.copy(tunneledPlayback = false) else stored
         }
         val previous = _state.value
+        // An episode that follows on keeps what the viewer picked in the player; a title opened afresh
+        // starts from the stored default.
         _state.value = if (carryOver) {
             PlayerUiState(isLoading = true, aspectMode = previous.aspectMode, playbackSpeed = previous.playbackSpeed)
         } else {
-            PlayerUiState(isLoading = true)
+            PlayerUiState(isLoading = true, aspectMode = AspectMode.from(settings.defaultAspect))
         }
 
         val info = try {
@@ -984,6 +988,7 @@ class PlaybackController @Inject constructor(
                         peers = status.peers,
                         seeds = status.seeds,
                         downloadBytesPerSecond = status.downloadRateBytesPerSecond,
+                        uploadBytesPerSecond = status.uploadRateBytesPerSecond,
                         progress = status.progress,
                         hasMetadata = status.hasMetadata,
                     ),

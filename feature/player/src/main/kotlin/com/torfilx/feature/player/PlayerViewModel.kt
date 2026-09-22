@@ -4,6 +4,7 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.torfilx.core.data.settings.SettingsRepository
+import com.torfilx.core.model.AppSettings
 import com.torfilx.core.player.AspectMode
 import com.torfilx.core.player.PlaybackController
 import com.torfilx.core.player.PlaybackRequest
@@ -11,9 +12,11 @@ import com.torfilx.core.player.PlayerUiState
 import com.torfilx.core.player.display.DisplayModeController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -64,6 +67,10 @@ class PlayerViewModel @Inject constructor(
 
     private val _skipIntroAutomatically = MutableStateFlow(false)
     val skipIntroAutomatically: StateFlow<Boolean> = _skipIntroAutomatically.asStateFlow()
+
+    /** Seek step, subtitle look and the stats overlay: what the screen itself needs from Settings. */
+    val preferences: StateFlow<AppSettings> =
+        settingsRepository.settings.stateIn(viewModelScope, SharingStarted.Eagerly, AppSettings())
 
     init {
         viewModelScope.launch {

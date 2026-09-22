@@ -151,6 +151,15 @@ class ProgressRepository @Inject constructor(
         }.onFailure { TorfilxLog.e(TAG, "Failed to remove $itemId from Continue Watching", it) }
     }
 
+    /**
+     * Forgets everything watched: resume points, watched marks, and so Continue Watching. My List is
+     * a separate choice and is kept.
+     */
+    suspend fun clearWatchHistory() {
+        progressDao.clear()
+        showStateDao.clear()
+    }
+
     /** Records that the show's current "up next" card, if it has one, was dismissed. */
     private suspend fun dismissUpNext(showId: String) {
         val finished = ShowPlayRules.lastFinished(catalog.seasons(showId), currentProgressMap()) ?: return

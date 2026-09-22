@@ -20,15 +20,23 @@ import com.torfilx.core.data.catalog.CatalogueUpdateRecord
 import com.torfilx.core.data.catalog.CatalogueUpdateSettings
 import com.torfilx.core.data.catalog.RejectedCatalogue
 import com.torfilx.core.model.AppSettings
+import com.torfilx.core.model.AspectPreference
+import com.torfilx.core.model.AutoplayCountdown
+import com.torfilx.core.model.LibrarySort
 import com.torfilx.core.model.MetadataTimeout
 import com.torfilx.core.model.QualityPreference
+import com.torfilx.core.model.SeekStep
 import com.torfilx.core.model.StreamingMode
+import com.torfilx.core.model.SubtitleSize
+import com.torfilx.core.model.SubtitleStyle
+import com.torfilx.core.model.UploadLimit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
@@ -52,7 +60,7 @@ private const val TAG = "Settings"
 class SettingsRepository @Inject constructor(
     @ApplicationContext private val context: Context,
     @Dispatcher(TorfilxDispatcher.IO) private val ioDispatcher: CoroutineDispatcher,
-) : CatalogueUpdatePrefs {
+) : CatalogueUpdatePrefs, LibraryPreferences {
 
     private val dataStore: DataStore<Preferences> by lazy {
         PreferenceDataStoreFactory.create(
@@ -93,6 +101,16 @@ class SettingsRepository @Inject constructor(
         val METADATA_TIMEOUT = stringPreferencesKey("metadata_timeout")
         val STREAMING_MODE = stringPreferencesKey("streaming_mode")
         val FORCE_SOFTWARE_DECODER = booleanPreferencesKey("force_software_decoder")
+        val SEEK_STEP = stringPreferencesKey("seek_step")
+        val AUTOPLAY_COUNTDOWN = stringPreferencesKey("autoplay_countdown")
+        val DEFAULT_ASPECT = stringPreferencesKey("default_aspect")
+        val SHOW_STREAM_STATS = booleanPreferencesKey("show_stream_stats")
+        val SUBTITLE_SIZE = stringPreferencesKey("subtitle_size")
+        val SUBTITLE_STYLE = stringPreferencesKey("subtitle_style")
+        val UPLOAD_LIMIT = stringPreferencesKey("upload_limit")
+        val LIBRARY_SORT = stringPreferencesKey("library_sort")
+        val HIDE_WATCHED = booleanPreferencesKey("hide_watched")
+        val REDUCE_MOTION = booleanPreferencesKey("reduce_motion")
 
         // Catalogue updates over the peer network.
         val CATALOG_UPDATES_ENABLED = booleanPreferencesKey("catalog_updates_enabled")
@@ -101,6 +119,22 @@ class SettingsRepository @Inject constructor(
         val CATALOG_LAST_SUCCESS_MS = longPreferencesKey("catalog_last_success_ms")
         val CATALOG_REJECTED_VERSION = longPreferencesKey("catalog_rejected_version")
         val CATALOG_REJECTED_APP_VERSION = intPreferencesKey("catalog_rejected_app_version")
+
+        /**
+         * What "Reset all settings" clears.
+         *
+         * Not the sharing consent: that is a decision about uploading and exposing the viewer's
+         * address, and a reset of preferences must not quietly take it back or re-grant it. Not the
+         * catalogue updater's bookkeeping either, which is a record rather than a preference.
+         */
+        val RESETTABLE: List<Preferences.Key<*>> = listOf(
+            AUDIO_LANGUAGE, SUBTITLE_LANGUAGE, SUBTITLES_ON, AUTOPLAY_NEXT, QUALITY,
+            FRAME_RATE_MATCHING, TUNNELED_PLAYBACK, SKIP_INTRO_AUTO, SEEDING_ENABLED, STORAGE_FRACTION,
+            USE_DHT, USE_EXTRA_TRACKERS, METADATA_TIMEOUT, STREAMING_MODE, FORCE_SOFTWARE_DECODER,
+            SEEK_STEP, AUTOPLAY_COUNTDOWN, DEFAULT_ASPECT, SHOW_STREAM_STATS, SUBTITLE_SIZE,
+            SUBTITLE_STYLE, UPLOAD_LIMIT, LIBRARY_SORT, HIDE_WATCHED, REDUCE_MOTION,
+            CATALOG_UPDATES_ENABLED,
+        )
     }
 
     val settings: Flow<AppSettings> = preferences
@@ -134,8 +168,26 @@ class SettingsRepository @Inject constructor(
                     runCatching { StreamingMode.valueOf(name) }.getOrNull()
                 } ?: StreamingMode.SEQUENTIAL,
                 forceSoftwareDecoder = prefs[Keys.FORCE_SOFTWARE_DECODER] ?: false,
+                seekStep = prefs.enumOrNull(Keys.SEEK_STEP) ?: SeekStep.TEN,
+                autoplayCountdown = prefs.enumOrNull(Keys.AUTOPLAY_COUNTDOWN) ?: AutoplayCountdown.STANDARD,
+                defaultAspect = prefs.enumOrNull(Keys.DEFAULT_ASPECT) ?: AspectPreference.FIT,
+                showStreamStats = prefs[Keys.SHOW_STREAM_STATS] ?: false,
+                subtitleSize = prefs.enumOrNull(Keys.SUBTITLE_SIZE) ?: SubtitleSize.TV_DEFAULT,
+                subtitleStyle = prefs.enumOrNull(Keys.SUBTITLE_STYLE) ?: SubtitleStyle.TV_DEFAULT,
+                // An unreadable value falls back to the floor, never below it.
+                uploadLimit = prefs.enumOrNull(Keys.UPLOAD_LIMIT) ?: UploadLimit.STANDARD,
+                librarySort = prefs.enumOrNull(Keys.LIBRARY_SORT) ?: LibrarySort.DEFAULT,
+                hideWatched = prefs[Keys.HIDE_WATCHED] ?: false,
+                reduceMotion = prefs[Keys.REDUCE_MOTION] ?: false,
             )
         }
+
+    override val libraryDefaults: Flow<LibraryDefaults> = settings
+        .map { LibraryDefaults(sort = it.librarySort, hideWatched = it.hideWatched) }
+        .distinctUntilChanged()
+
+    /** Only the reduce-motion switch, so the whole UI is not recomposed when anything else changes. */
+    val reduceMotion: Flow<Boolean> = settings.map { it.reduceMotion }.distinctUntilChanged()
 
     /**
      * Whether the user has agreed to share (upload) while watching over BitTorrent.
@@ -180,6 +232,20 @@ class SettingsRepository @Inject constructor(
     suspend fun setStreamingMode(mode: StreamingMode) = edit { it[Keys.STREAMING_MODE] = mode.name }
     suspend fun setForceSoftwareDecoder(enabled: Boolean) =
         edit { it[Keys.FORCE_SOFTWARE_DECODER] = enabled }
+
+    suspend fun setSeekStep(step: SeekStep) = edit { it[Keys.SEEK_STEP] = step.name }
+    suspend fun setAutoplayCountdown(value: AutoplayCountdown) = edit { it[Keys.AUTOPLAY_COUNTDOWN] = value.name }
+    suspend fun setDefaultAspect(value: AspectPreference) = edit { it[Keys.DEFAULT_ASPECT] = value.name }
+    suspend fun setShowStreamStats(enabled: Boolean) = edit { it[Keys.SHOW_STREAM_STATS] = enabled }
+    suspend fun setSubtitleSize(size: SubtitleSize) = edit { it[Keys.SUBTITLE_SIZE] = size.name }
+    suspend fun setSubtitleStyle(style: SubtitleStyle) = edit { it[Keys.SUBTITLE_STYLE] = style.name }
+    suspend fun setUploadLimit(limit: UploadLimit) = edit { it[Keys.UPLOAD_LIMIT] = limit.name }
+    suspend fun setLibrarySort(sort: LibrarySort) = edit { it[Keys.LIBRARY_SORT] = sort.name }
+    suspend fun setHideWatched(enabled: Boolean) = edit { it[Keys.HIDE_WATCHED] = enabled }
+    suspend fun setReduceMotion(enabled: Boolean) = edit { it[Keys.REDUCE_MOTION] = enabled }
+
+    /** Puts every preference back to its default. Sharing consent is kept; see [Keys.RESETTABLE]. */
+    suspend fun resetToDefaults() = edit { prefs -> Keys.RESETTABLE.forEach { key -> prefs -= key } }
 
     // --- Catalogue updates -----------------------------------------------------------------------
 
@@ -234,6 +300,8 @@ class SettingsRepository @Inject constructor(
         internal set
     var cachedMetadataTimeoutSeconds: Int = MetadataTimeout.STANDARD.seconds
         internal set
+    var cachedUploadLimitBytes: Int = UploadLimit.STANDARD.bytesPerSecond
+        internal set
 
     companion object {
         const val DEFAULT_STORAGE_FRACTION = 0.5f
@@ -244,6 +312,10 @@ class SettingsRepository @Inject constructor(
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
         withContext(ioDispatcher) { dataStore.edit(block) }
     }
+
+    /** The stored enum constant, or null when it is missing or names one a later build removed. */
+    private inline fun <reified T : Enum<T>> Preferences.enumOrNull(key: Preferences.Key<String>): T? =
+        this[key]?.let { name -> runCatching { enumValueOf<T>(name) }.getOrNull() }
 
     private suspend fun editNullable(key: Preferences.Key<String>, value: String?) {
         withContext(ioDispatcher) {

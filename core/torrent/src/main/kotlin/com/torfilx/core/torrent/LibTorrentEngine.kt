@@ -18,6 +18,7 @@ import com.torfilx.core.model.CachedParts
 import com.torfilx.core.model.EpisodeFileMatcher
 import com.torfilx.core.model.FileSelection
 import com.torfilx.core.model.MagnetLink
+import com.torfilx.core.model.UploadLimit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
@@ -202,11 +203,11 @@ class LibTorrentEngine @Inject constructor(
                 setBoolean(settings_pack.bool_types.enable_lsd.swigValue(), true)
                 setString(settings_pack.string_types.user_agent.swigValue(), USER_AGENT)
                 // Upload is only allowed once the user has consented to sharing, and even then it is
-                // capped rather than unlimited: seeding must not saturate the household uplink and
-                // degrade the viewer's own streaming (or everything else on the network).
+                // capped by default: seeding must not saturate the household uplink and degrade the
+                // viewer's own streaming. The viewer may raise the cap in Settings, never lower it.
                 setInteger(
                     settings_pack.int_types.upload_rate_limit.swigValue(),
-                    if (consentProvider.hasConsented()) UPLOAD_RATE_LIMIT_BYTES else 1,
+                    uploadRateLimit(consentProvider.hasConsented()),
                 )
             }
             runCatching { session.applySettings(tweaks) }
@@ -545,10 +546,7 @@ class LibTorrentEngine @Inject constructor(
         runCatching {
             session.applySettings(
                 SettingsPack().apply {
-                    setInteger(
-                        settings_pack.int_types.upload_rate_limit.swigValue(),
-                        if (consented) UPLOAD_RATE_LIMIT_BYTES else 1,
-                    )
+                    setInteger(settings_pack.int_types.upload_rate_limit.swigValue(), uploadRateLimit(consented))
                 },
             )
             if (!consented) {
@@ -559,6 +557,38 @@ class LibTorrentEngine @Inject constructor(
                 }
             }
         }.onFailure { TorfilxLog.w(TAG, "Could not apply consent change", it) }
+    }
+
+    /**
+     * Applies a new upload cap from Settings to the running session straight away.
+     *
+     * Unlike the DHT switch this needs no new session, so there is no reason to make the viewer wait
+     * for the next title. Without consent the throttle stays at nothing whatever the cap says.
+     */
+    fun onUploadLimitChanged() {
+        if (!started) return
+        val limit = uploadRateLimit(consentProvider.hasConsented())
+        runCatching {
+            session.applySettings(
+                SettingsPack().apply {
+                    setInteger(settings_pack.int_types.upload_rate_limit.swigValue(), limit)
+                },
+            )
+            TorfilxLog.i(TAG, "Upload cap now ${if (limit == 0) "unlimited" else "${limit / BYTES_PER_KIB} KiB/s"}")
+        }.onFailure { TorfilxLog.w(TAG, "Could not apply the upload cap", it) }
+    }
+
+    /**
+     * libtorrent's `upload_rate_limit` for the current consent and configured cap.
+     *
+     * 1 byte/s without consent: libtorrent reads 0 as "unlimited", so 1 is the nearest thing to off.
+     * With consent, 0 (no cap) passes through, and any other value is held to the built-in floor so a
+     * stale or hand-edited preference can never throttle sharing below what the app always gave.
+     */
+    private fun uploadRateLimit(consented: Boolean): Int {
+        if (!consented) return 1
+        val configured = config.uploadRateLimitBytes()
+        return if (configured == 0) 0 else maxOf(configured, UploadLimit.FLOOR_BYTES_PER_SECOND)
     }
 
     /** The budget in force; overridable from Settings. */
@@ -754,9 +784,7 @@ class LibTorrentEngine @Inject constructor(
         const val MAX_ACTIVE_SEEDS = 4
         const val CONNECTION_LIMIT = 120
         const val USER_AGENT = "Torfilx/1.0 libtorrent/1.2"
-
-        /** Upload cap while sharing (bytes/sec). Contributes to the swarm without hogging the uplink. */
-        const val UPLOAD_RATE_LIMIT_BYTES = 2 * 1024 * 1024
+        const val BYTES_PER_KIB = 1024
 
         /**
          * Live public trackers added to every torrent so peer discovery never rests on the DHT
@@ -799,4 +827,7 @@ interface TorrentConfigProvider {
 
     /** How long to wait for a swarm to deliver a title's metadata. */
     fun metadataTimeoutMs(): Long = 120_000L
+
+    /** Upload cap while sharing, in bytes per second; 0 for no cap. Held to [UploadLimit]'s floor. */
+    fun uploadRateLimitBytes(): Int = UploadLimit.STANDARD.bytesPerSecond
 }

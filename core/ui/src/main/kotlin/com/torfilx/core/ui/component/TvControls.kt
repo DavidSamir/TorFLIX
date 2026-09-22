@@ -1,7 +1,5 @@
 package com.torfilx.core.ui.component
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -32,8 +30,11 @@ import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.torfilx.core.common.log.TorfilxLog
-import com.torfilx.core.ui.theme.FOCUS_ANIMATION_MS
+import com.torfilx.core.ui.theme.animateFocusScale
 import com.torfilx.core.ui.theme.TorfilxColors
+
+/** Buttons zoom less than cards: they sit in rows, and a big zoom would overlap the next one. */
+private const val BUTTON_FOCUS_SCALE = 1.06f
 
 /**
  * The one button used everywhere.
@@ -54,11 +55,7 @@ fun TvButton(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
-    val scale by animateFloatAsState(
-        targetValue = if (isFocused) 1.06f else 1f,
-        animationSpec = tween(FOCUS_ANIMATION_MS),
-        label = "buttonScale",
-    )
+    val scale by animateFocusScale(isFocused, focusedScale = BUTTON_FOCUS_SCALE, label = "buttonScale")
     val requester = focusRequester ?: remember { FocusRequester() }
 
     LaunchedEffect(autoFocus, enabled) {

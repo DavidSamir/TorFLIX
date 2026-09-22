@@ -39,6 +39,46 @@ data class DailyContribution(
     val downloadedBytes: Long,
 )
 
+/** Bytes streamed in from peers and out to them over some period. */
+data class TransferTotals(
+    val downloadedBytes: Long = 0,
+    val uploadedBytes: Long = 0,
+)
+
+/**
+ * What Settings shows under "Data streamed": today, the last 30 days, and everything since the
+ * record was last cleared.
+ */
+data class StreamedTotals(
+    val today: TransferTotals = TransferTotals(),
+    val last30Days: TransferTotals = TransferTotals(),
+    val allTime: TransferTotals = TransferTotals(),
+) {
+    companion object {
+        /**
+         * Folds the per-day rollup and the per-title record into the three figures.
+         *
+         * All-time comes from the per-title rows rather than the days, because days older than the
+         * retention window are pruned and titles are not.
+         */
+        fun from(days: List<DailyContribution>, titles: List<TitleContribution>, todayEpochDay: Long) = StreamedTotals(
+            today = days.filter { it.epochDay == todayEpochDay }.total(),
+            last30Days = days.filter { it.epochDay > todayEpochDay - DAYS_IN_MONTH_WINDOW }.total(),
+            allTime = TransferTotals(
+                downloadedBytes = titles.sumOf { it.downloadedBytes },
+                uploadedBytes = titles.sumOf { it.uploadedBytes },
+            ),
+        )
+
+        private fun List<DailyContribution>.total() = TransferTotals(
+            downloadedBytes = sumOf { it.downloadedBytes },
+            uploadedBytes = sumOf { it.uploadedBytes },
+        )
+
+        private const val DAYS_IN_MONTH_WINDOW = 30
+    }
+}
+
 /**
  * Which parts of a film are on this device.
  *

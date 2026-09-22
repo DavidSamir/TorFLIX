@@ -37,6 +37,16 @@ enum class AspectMode(val label: String) {
     FIT("Fit"),
     FILL("Fill"),
     ZOOM("Zoom"),
+    ;
+
+    companion object {
+        /** The mode a new title opens in, from the stored preference. */
+        fun from(preference: com.torfilx.core.model.AspectPreference): AspectMode = when (preference) {
+            com.torfilx.core.model.AspectPreference.FIT -> FIT
+            com.torfilx.core.model.AspectPreference.FILL -> FILL
+            com.torfilx.core.model.AspectPreference.ZOOM -> ZOOM
+        }
+    }
 }
 
 /** Distinct failure kinds so each gets its own copy and recovery action (plan.md §7.4). */
@@ -141,6 +151,7 @@ data class StreamStats(
     val peers: Int = 0,
     val seeds: Int = 0,
     val downloadBytesPerSecond: Int = 0,
+    val uploadBytesPerSecond: Int = 0,
     val progress: Float = 0f,
     val hasMetadata: Boolean = false,
 )
