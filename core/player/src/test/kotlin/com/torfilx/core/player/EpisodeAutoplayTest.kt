@@ -250,6 +250,23 @@ class EpisodeAutoplayTest {
     }
 
     @Test
+    fun `two countdowns started in the same instant fire once, for the later one`() = runTest {
+        val h = harness()
+        h.autoplay.onEpisodeEnded(seasons, e1, autoplay = true, showTitle = "Show")
+        h.autoplay.onEpisodeEnded(seasons, e2, autoplay = true, showTitle = "Show")
+        idle()
+        assertThat(h.played).containsExactly(e3.id to null)
+        assertThat(h.autoplay.unattendedAutoplays).isEqualTo(1)
+
+        // And a countdown cancelled at its very end plays nothing at all.
+        h.autoplay.onEpisodeEnded(seasons, e3, autoplay = true, showTitle = "Show")
+        advanceTimeBy(10_000)
+        h.autoplay.reset()
+        idle()
+        assertThat(h.played).containsExactly(e3.id to null)
+    }
+
+    @Test
     fun `a countdown resumed after still watching warms again`() = runTest {
         val h = harness()
         repeat(3) { h.autoplay.onEpisodeEnded(seasons, e1, autoplay = true, showTitle = "Show"); idle() }

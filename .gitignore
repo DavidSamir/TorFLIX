@@ -27,9 +27,7 @@ dist/catalogue/
 # can sign a catalogue every TORFILX build trusts, so it must never be tracked, even by accident.
 *.seed
 
-# This repo is public. Internal working notes and generated reports that narrate how a feature was
-# built (bugs hit, local paths, in-progress reasoning) are not for the public repo, even though the
-# feature docs they inform (README.md, docs/CATALOGUE_P2P.md, TESTING_PLAN.md, docs/RELEASING.md)
-# are tracked as usual.
-next-build.md
-docs/*_IMPLEMENTATION_REPORT.md
+# This repo is public. Every Markdown file (plans, working notes, reports, runbooks) stays local;
+# only the README is published.
+*.md
+!/README.md

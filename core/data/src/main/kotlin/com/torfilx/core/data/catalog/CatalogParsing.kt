@@ -343,12 +343,43 @@ private class SeasonBuilder(val number: Int, val name: String?, val image: Strin
     }
 }
 
-/** `1959-10-02` as epoch milliseconds at UTC midnight; null when absent or not a date. */
+private val ISO_DATE = Regex("""(\d{4})-(\d{2})-(\d{2})""")
+private const val MS_PER_DAY = 86_400_000L
+
+/**
+ * `1959-10-02` as epoch milliseconds at UTC midnight; null when absent or not a date.
+ *
+ * Counted by hand rather than with `java.time`, which only exists from API 26: the floor device is a
+ * Fire OS 5 stick at API 22 and the app does not desugar, so `LocalDate` there is a missing class.
+ * Proleptic Gregorian, exactly what `LocalDate` would give.
+ */
 internal fun parseAirDate(text: String?): Long? {
     val trimmed = text?.trim()?.takeIf { it.isNotEmpty() } ?: return null
-    return runCatching {
-        java.time.LocalDate.parse(trimmed).atStartOfDay(java.time.ZoneOffset.UTC).toInstant().toEpochMilli()
-    }.getOrNull()
+    val (y, m, d) = ISO_DATE.matchEntire(trimmed)?.destructured ?: return null
+    val year = y.toInt()
+    val month = m.toInt()
+    val day = d.toInt()
+    if (month !in 1..12 || day !in 1..daysInMonth(year, month)) return null
+    return epochDay(year, month, day) * MS_PER_DAY
+}
+
+private fun isLeapYear(year: Int): Boolean = year % 4 == 0 && (year % 100 != 0 || year % 400 == 0)
+
+private fun daysInMonth(year: Int, month: Int): Int = when (month) {
+    2 -> if (isLeapYear(year)) 29 else 28
+    4, 6, 9, 11 -> 30
+    else -> 31
+}
+
+/** Days since 1970-01-01 for a proleptic Gregorian date (Howard Hinnant's `days_from_civil`). */
+private fun epochDay(year: Int, month: Int, day: Int): Long {
+    val y = if (month <= 2) year - 1 else year
+    val era = (if (y >= 0) y else y - 399) / 400
+    val yearOfEra = y - era * 400
+    val monthFromMarch = (month + 9) % 12
+    val dayOfYear = (153 * monthFromMarch + 2) / 5 + day - 1
+    val dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear
+    return era * 146_097L + dayOfEra - 719_468L
 }
 
 private fun String.qualityHeight(): Int? = when {

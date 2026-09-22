@@ -27,6 +27,7 @@ import com.torfilx.core.testing.FakeSearchHistoryDao
 import com.torfilx.core.testing.FakeTimeProvider
 import com.torfilx.core.testing.MainDispatcherRule
 import com.torfilx.core.testing.inMemoryCatalog
+import com.torfilx.core.torrent.TorrentError
 import com.torfilx.core.torrent.TorrentStream
 import io.mockk.Runs
 import io.mockk.coEvery
@@ -36,6 +37,7 @@ import io.mockk.just
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.emptyFlow
@@ -95,18 +97,36 @@ class PlaybackControllerShowTest {
 
     private val listener = slot<Player.Listener>()
     private var position = 0L
+
+    /** Every start position handed to the player, in order. */
+    private val startPositions = mutableListOf<Long>()
     private val exo = mockk<ExoPlayer>(relaxed = true) {
         every { addListener(capture(listener)) } just Runs
         every { currentPosition } answers { position }
         every { duration } returns C.TIME_UNSET
         every { currentTracks } returns Tracks.EMPTY
+        every { setMediaItem(any(), capture(startPositions)) } just Runs
     }
     private val streamed = mutableListOf<Triple<String, FileSelection, String?>>()
+
+    /** When set, the next stream call waits on it: a swarm that is slow to answer. */
+    private var swarm: CompletableDeferred<Unit>? = null
+
+    /** How many stream calls, from the next one, time out looking for peers. */
+    private var timeouts = 0
     private val coordinator = mockk<TorrentCoordinator>(relaxed = true) {
         every { torrents } returns emptyFlow()
-        coEvery { stream(any(), any(), any()) } answers {
+        coEvery { stream(any(), any(), any()) } coAnswers {
             val magnet = firstArg<String>()
             streamed += Triple(magnet, secondArg(), thirdArg())
+            swarm?.let { gate ->
+                swarm = null
+                gate.await()
+            }
+            if (timeouts > 0) {
+                timeouts--
+                throw TorrentError.MetadataTimeout()
+            }
             TorrentStream(MagnetLink.infoHashOf(magnet)!!, "http://127.0.0.1:1/x", "x.mkv", 1)
         }
     }
@@ -368,6 +388,109 @@ class PlaybackControllerShowTest {
         advanceTimeBy(1_000)
         runCurrent()
         assertThat(c.state.value.episode?.id).isEqualTo(e2)
+    }
+
+    // --- Leaving, or losing the screen, while the next episode is still starting -----------------
+
+    @Test
+    fun `backing out while the next episode resolves saves nothing under it and never starts it`() = runTest(main.dispatcher) {
+        autoplay.value = false
+        val c = controller()
+        c.open(PlaybackRequest(e1))
+        endPlayback()
+        assertThat(c.state.value.endCard).isInstanceOf(EndCard.Next::class.java)
+
+        // "Play": the next episode's swarm is slow to answer, and the screen says so from the start.
+        val gate = CompletableDeferred<Unit>()
+        swarm = gate
+        c.playNext()
+        runCurrent()
+        assertThat(c.state.value.isLoading).isTrue()
+        assertThat(c.state.value.endCard).isNull()
+
+        // Back, while the player still holds the last frame of the first episode.
+        c.stop(release = false)
+        gate.complete(Unit)
+        advanceTimeBy(5_000)
+        runCurrent()
+
+        // Nothing was written under the second episode: the player's 25 minutes were the first one's,
+        // and saving them under the second marked it watched before it had played a frame.
+        assertThat(progressDao.rows.value.map { it.itemId }).containsExactly(e1)
+        assertThat(progressDao.rows.value.single().watched).isTrue()
+        // The player was never handed the second episode, and the torrent that arrived after the
+        // viewer left was let go.
+        assertThat(startPositions).hasSize(1)
+        assertThat(c.state.value.episode).isNull()
+        coVerify { coordinator.stopStreaming(hashOf(episodes[1])) }
+    }
+
+    @Test
+    fun `retry after the next episode failed to start plays it from its beginning`() = runTest(main.dispatcher) {
+        autoplay.value = false
+        val c = controller()
+        c.open(PlaybackRequest(e1))
+        endPlayback()
+
+        // Both attempts at the second episode's swarm time out; the position ticker runs throughout,
+        // with the player still reporting the first episode's final position.
+        timeouts = 2
+        c.playNext()
+        advanceTimeBy(5_000)
+        runCurrent()
+        assertThat(c.state.value.error).isInstanceOf(PlaybackError.Network::class.java)
+        assertThat(c.state.value.positionMs).isEqualTo(0L)
+
+        c.retry()
+        runCurrent()
+
+        assertThat(c.state.value.episode?.id).isEqualTo(e2)
+        // Not from 25 minutes in, which for a 25-minute episode is its end: it would have finished at
+        // once, been marked watched, and counted down to the third.
+        assertThat(startPositions).containsExactly(0L, 0L).inOrder()
+        assertThat(progressDao.rows.value.map { it.itemId }).containsExactly(e1)
+    }
+
+    @Test
+    fun `the next episode arriving after the app left the screen is readied, not played`() = runTest(main.dispatcher) {
+        autoplay.value = false
+        val c = controller()
+        c.open(PlaybackRequest(e1))
+        endPlayback()
+
+        val gate = CompletableDeferred<Unit>()
+        swarm = gate
+        c.playNext()
+        runCurrent()
+        c.onBackground()
+        gate.complete(Unit)
+        runCurrent()
+
+        assertThat(c.state.value.episode?.id).isEqualTo(e2)
+        verify(exactly = 1) { exo.playWhenReady = true }
+        verify { exo.playWhenReady = false }
+        assertThat(progressDao.rows.value.map { it.itemId }).containsExactly(e1)
+    }
+
+    @Test
+    fun `progress written while an episode plays is its own, before and after an advance`() = runTest(main.dispatcher) {
+        val c = controller()
+        c.open(PlaybackRequest(e1))
+        position = 5 * MINUTE
+        c.pause()
+        runCurrent()
+        assertThat(progressDao.rows.value.single { it.itemId == e1 }.positionMs).isEqualTo(5 * MINUTE)
+
+        endPlayback()
+        advanceTimeBy(10_500)
+        runCurrent()
+        assertThat(c.state.value.episode?.id).isEqualTo(e2)
+
+        position = 3 * MINUTE
+        c.pause()
+        runCurrent()
+        assertThat(progressDao.rows.value.single { it.itemId == e2 }.positionMs).isEqualTo(3 * MINUTE)
+        assertThat(progressDao.rows.value.single { it.itemId == e1 }.watched).isTrue()
     }
 
     @Test

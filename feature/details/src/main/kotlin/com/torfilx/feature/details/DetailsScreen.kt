@@ -325,7 +325,9 @@ private fun ShowDetailsContent(
                 )
             }
         } else {
-            items(count = episodes.size, key = { episodes[it].id }, contentType = { "episode" }) { index ->
+            // Prefixed so an episode id can never collide with the fixed keys above (a duplicate key is
+            // a crash), however a hand-edited catalogue names its episodes.
+            items(count = episodes.size, key = { "episode:" + episodes[it].id }, contentType = { "episode" }) { index ->
                 val episode = episodes[index]
                 val requester = episodeFocus.getOrPut(episode.id) { FocusRequester() }
                 EpisodeRow(

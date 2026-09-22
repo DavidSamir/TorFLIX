@@ -4,6 +4,7 @@ import com.torfilx.core.common.log.TorfilxLog
 import com.torfilx.core.model.FileSelection
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
@@ -71,12 +72,9 @@ internal class NextEpisodeWarmer(
     /** Starts fetching [playableId]'s torrent. Anything warmed before for another episode is released. */
     fun warm(playableId: String) {
         val warm = Warm(playableId)
-        val previous = synchronized(lock) {
-            current?.takeIf { it.playableId == playableId }?.let { return }
-            current.also { current = warm }
-        }
-        previous?.let(::letGo)
-        warm.job = scope.launch {
+        // The job exists before the warm is published, so a claim can never meet a warm without one;
+        // it starts once the warm is current (a join from claim would start it too).
+        warm.job = scope.launch(start = CoroutineStart.LAZY) {
             val target = runCatching { resolve(playableId) }
                 .onFailure { if (it is CancellationException) throw it }
                 .getOrNull()
@@ -98,6 +96,15 @@ internal class NextEpisodeWarmer(
             warm.streamed = true
             if (!warm.wanted) runCatching { release(target.infoHash) }
         }
+        val previous = synchronized(lock) {
+            current?.takeIf { it.playableId == playableId }?.let {
+                warm.job.cancel()
+                return
+            }
+            current.also { current = warm }
+        }
+        previous?.let(::letGo)
+        warm.job.start()
     }
 
     /**

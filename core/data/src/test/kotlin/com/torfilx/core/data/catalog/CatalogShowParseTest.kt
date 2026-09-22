@@ -261,4 +261,24 @@ class CatalogShowParseTest {
         assertThat(parseAirDate("")).isNull()
         assertThat(parseAirDate(null)).isNull()
     }
+
+    @Test
+    fun `air dates are counted exactly, leap days included, without java time`() {
+        // Known instants, so the hand-rolled calendar is checked against the real one.
+        assertThat(parseAirDate("2000-03-01")).isEqualTo(951_868_800_000L)
+        assertThat(parseAirDate("2024-02-29")).isEqualTo(1_709_164_800_000L)
+        assertThat(parseAirDate("1900-02-28")).isEqualTo(-2_203_977_600_000L)
+        assertThat(parseAirDate("2038-01-19")).isEqualTo(2_147_472_000_000L)
+        assertThat(parseAirDate("1959-12-31")).isEqualTo(-315_705_600_000L)
+
+        // Not dates: an impossible day, a century year that is not a leap year, a month past twelve,
+        // a time suffix, and unpadded parts (which the ISO form the catalogue uses never has).
+        assertThat(parseAirDate("2023-02-29")).isNull()
+        assertThat(parseAirDate("1900-02-29")).isNull()
+        assertThat(parseAirDate("1959-13-01")).isNull()
+        assertThat(parseAirDate("1959-04-31")).isNull()
+        assertThat(parseAirDate("1959-10-02T00:00:00Z")).isNull()
+        assertThat(parseAirDate("1959-10-2")).isNull()
+        assertThat(parseAirDate("1959-00-10")).isNull()
+    }
 }

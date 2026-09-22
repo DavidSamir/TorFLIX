@@ -6,6 +6,7 @@ import com.torfilx.core.model.Season
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 
 /**
@@ -135,12 +136,15 @@ internal class EpisodeAutoplay(
     private fun startCountdown(next: Episode) {
         cancelCountdown()
         warm(next)
-        countdownJob = scope.launch {
+        val job = scope.launch {
             for (seconds in countdownSeconds downTo 1) {
                 setCard(EndCard.Countdown(next, seconds))
                 delay(MS_PER_SECOND)
             }
-            countdownJob = null
+            // Cancelled in the instant after the last tick — the viewer left, or another countdown
+            // began — this plays nothing, and leaves a newer countdown's job alone.
+            ensureActive()
+            if (countdownJob === coroutineContext[Job]) countdownJob = null
             // The app can leave the screen in the instant between the last tick and here.
             if (!onScreen) {
                 setCard(EndCard.Next(next))
@@ -149,6 +153,7 @@ internal class EpisodeAutoplay(
             unattendedAutoplays++
             advance(next.id, null)
         }
+        countdownJob = job
     }
 
     private fun cancelCountdown() {

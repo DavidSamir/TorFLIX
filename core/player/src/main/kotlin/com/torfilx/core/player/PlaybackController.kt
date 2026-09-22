@@ -44,6 +44,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
@@ -103,6 +104,27 @@ class PlaybackController @Inject constructor(
     private var activeTorrentInfoHash: String? = null
 
     /**
+     * The title whose media item the player holds: set the instant it is handed over, cleared by [stop].
+     *
+     * [resolved] moves on to the next title before its swarm is even asked for, so for the whole wait —
+     * a minute on a slow swarm — the player still reports the *previous* title's position, or 0 after a
+     * stop. Progress written in that window went under the new id: backing out while the next episode
+     * was starting marked it watched at the last one's end, and backing out of a slow re-open of a film
+     * wrote a resume point of 0 over the real one. Progress is only saved, and the position only read,
+     * while this is the title in [resolved].
+     */
+    @Volatile
+    private var loadedPlayableId: String? = null
+
+    /**
+     * Counts every [stop]. An open that outlives the stop that should have ended it — the viewer backed
+     * out while the next episode's swarm was resolving — must not hand the player its item, or the
+     * episode plays on with nobody watching and no screen to stop it from.
+     */
+    @Volatile
+    private var openEpoch: Int = 0
+
+    /**
      * The next episode's torrent, fetched while the countdown runs so the swarm is usually found by the
      * time it ends. Only a countdown warms anything; leaving the player or the screen lets it go.
      */
@@ -123,8 +145,10 @@ class PlaybackController @Inject constructor(
     private val autoplay = EpisodeAutoplay(
         scope = scope,
         currentCard = { _state.value.endCard },
-        setCard = { card -> _state.value = _state.value.copy(endCard = card) },
-        askStillWatching = { _state.value = _state.value.copy(showStillWatching = true) },
+        // Written from the countdown's own thread while the position ticker writes from the main one:
+        // atomic updates, or a tick could put back a card that was just taken down.
+        setCard = { card -> _state.update { it.copy(endCard = card) } },
+        askStillWatching = { _state.update { it.copy(showStillWatching = true) } },
         advance = ::advanceTo,
         warm = { next -> warmer.warm(next.id) },
         coolDown = { warmer.coolDown() },
@@ -225,11 +249,12 @@ class PlaybackController @Inject constructor(
      *   when the viewer starts something new from a screen.
      */
     private suspend fun open(request: PlaybackRequest, carryOver: Boolean) {
+        val epoch = openEpoch
         // The next episode may have been fetched during the countdown: this waits for that fetch and
         // takes it over. Whatever it fetched is let go if this open ends up not playing it.
         val warmed = warmer.claim(request.playableId)
         try {
-            openInternal(request, carryOver)
+            openInternal(request, carryOver, epoch)
         } catch (cancel: kotlinx.coroutines.CancellationException) {
             throw cancel
         } catch (error: Throwable) {
@@ -248,7 +273,8 @@ class PlaybackController @Inject constructor(
         }
     }
 
-    private suspend fun openInternal(requested: PlaybackRequest, carryOver: Boolean) {
+    /** @param epoch [openEpoch] when this open began; a [stop] since then means it must not play. */
+    private suspend fun openInternal(requested: PlaybackRequest, carryOver: Boolean, epoch: Int) {
         autoplay.onOpen()
 
         // A show is never played itself: its next-up episode is. Nothing produces a player route for a
@@ -349,10 +375,40 @@ class PlaybackController @Inject constructor(
 
         // A torrent source is a magnet, not a URL: the engine resolves it to a loopback HTTP stream
         // that serves pieces as they arrive, so playback starts long before the download finishes.
-        val playbackUrl = if (source.kind == SourceKind.TORRENT) {
+        val stream: TorrentStream? = if (source.kind == SourceKind.TORRENT) {
             val magnet = source.magnetUri ?: source.url
-            val stream = streamWithRetry(magnet, request.playableId, fileSelectionFor(source, episode), displayNameFor(item, episode))
+            streamWithRetry(magnet, request.playableId, fileSelectionFor(source, episode), displayNameFor(item, episode))
                 ?: return
+        } else {
+            null
+        }
+
+        val exoItem = buildMediaItem(stream?.url ?: source.url, info.subtitles, source.kind)
+        val handedOver = withContext(Dispatchers.Main) {
+            // The viewer may have left the player while the swarm was resolving. stop() runs on this
+            // thread, so nothing can come between this check and the hand-over.
+            if (epoch != openEpoch) return@withContext false
+            val exo = ensurePlayer()
+            // The player instance is reused between titles, and its speed with it. A new title starts at
+            // normal speed; the next episode keeps whatever the viewer chose.
+            exo.setPlaybackSpeed(if (carryOver) previous.playbackSpeed else 1f)
+            loadedPlayableId = request.playableId
+            exo.setMediaItem(exoItem, startPosition)
+            exo.prepare()
+            // Nothing plays for a screen nobody is looking at. A screen asking for a title is on screen
+            // by definition; this holds back the player's own re-opens — the next episode, a retry, an
+            // audio-recovery rebuild — when the app lost the screen while they were resolving. The
+            // viewer finds the title ready and paused when they come back.
+            exo.playWhenReady = autoplay.onScreen
+            true
+        }
+        if (!handedOver) {
+            TorfilxLog.i(TAG, "The player was stopped while ${request.playableId} was starting; not playing it")
+            stream?.let { unused -> scope.launch { runCatching { torrentCoordinator.stopStreaming(unused.infoHash) } } }
+            return
+        }
+
+        if (stream != null) {
             // A different torrent from the one feeding the player until now (the next episode, or another
             // quality after a decoder failure): the old one stops streaming, so it seeds or is removed as
             // the viewer's setting says instead of staying "streaming" — and unevictable — for good.
@@ -361,21 +417,8 @@ class PlaybackController @Inject constructor(
             }
             activeTorrentInfoHash = stream.infoHash
             startStreamStatsTicker(stream.infoHash)
-            stream.url
         } else {
             activeTorrentInfoHash = null
-            source.url
-        }
-
-        val exoItem = buildMediaItem(playbackUrl, info.subtitles, source.kind)
-        withContext(Dispatchers.Main) {
-            val exo = ensurePlayer()
-            // The player instance is reused between titles, and its speed with it. A new title starts at
-            // normal speed; the next episode keeps whatever the viewer chose.
-            exo.setPlaybackSpeed(if (carryOver) previous.playbackSpeed else 1f)
-            exo.setMediaItem(exoItem, startPosition)
-            exo.prepare()
-            exo.playWhenReady = true
         }
 
         _state.value = _state.value.copy(
@@ -585,7 +628,9 @@ class PlaybackController @Inject constructor(
      * once the next one is streaming (see [openInternal]).
      */
     private fun advanceTo(playableId: String, startPositionMs: Long?) {
-        _state.value = _state.value.copy(endCard = null)
+        // Loading from the first instant: the open may first wait for a fetch begun during the countdown,
+        // and a last frame with no card and no spinner over it looks like a remote that stopped working.
+        _state.update { it.copy(endCard = null, isLoading = true, error = null, loadingDetail = null) }
         scope.launch { open(PlaybackRequest(playableId = playableId, startPositionMs = startPositionMs), carryOver = true) }
     }
 
@@ -949,6 +994,10 @@ class PlaybackController @Inject constructor(
 
     private fun tick() {
         val exo = player ?: return
+        // While the next title resolves, the player still holds the last one: its position is not this
+        // title's, and read into the state it became the start position of a retry, so a retried next
+        // episode began at the previous one's end and finished at once.
+        if (loadedPlayableId != resolved?.playableId) return
         val position = exo.currentPosition
         val duration = exo.duration.takeIf { it != C.TIME_UNSET && it > 0 }
             ?: _state.value.durationMs
@@ -972,6 +1021,8 @@ class PlaybackController @Inject constructor(
     private fun saveProgress(force: Boolean) {
         val exo = player ?: return
         val info = resolved ?: return
+        // Never the previous title's position under this title's id (see loadedPlayableId).
+        if (loadedPlayableId != info.playableId) return
         val position = exo.currentPosition
         val duration = exo.duration.takeIf { it != C.TIME_UNSET && it > 0 } ?: info.durationMs
         if (duration <= 0) return
@@ -997,6 +1048,9 @@ class PlaybackController @Inject constructor(
      */
     fun stop(release: Boolean = true) {
         saveProgress(force = true)
+        // Any open still resolving belongs to the title being left: it must not play when it arrives.
+        openEpoch++
+        loadedPlayableId = null
         // Leaving ends any autoplay chain: nothing counts down, nothing is held back, and the next
         // title starts a fresh count of unattended autoplays.
         autoplay.reset()
