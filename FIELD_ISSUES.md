@@ -140,6 +140,29 @@ serving a fraction of the library.
 
 ---
 
+## G. Found while adding TV shows (Sept 2026)
+
+Three defects in the film code, found by reading it end to end for `docs/TV_SHOWS_PLAN.md`. Episodes
+would have made each of them the common path, so they were fixed first and on their own.
+
+- [x] **G1. "Direct only" broke automatic playback.** `SourceSelector` kept only `SourceKind.DIRECT`
+  under that preference, and every catalogue source is `TORRENT`, so Play from the hero or Continue
+  Watching failed with "format not supported". It now rules out only the transcode (`HLS`); a torrent
+  is the file itself and counts as direct play.
+- [x] **G2. "Auto" picked the largest file.** Torrent sources carry no codec, so every one passed the
+  decoder check and the comparator then took the tallest: a 2160p file on a 1080p stick, the slowest
+  possible start over a swarm. Sources taller than the display are now demoted (not excluded), and
+  "Max 1080p" lowers that ceiling as before.
+- [x] **G3. With seeding off, finished titles left unevictable data.** `TorrentCoordinator.stopStreaming`
+  removed the torrent but kept its files; a torrent no longer in the session is invisible to the storage
+  budget, so an evening of titles piled up gigabytes until the next start, and on a small stick the
+  free-space guard then paused every download. The torrent is now removed with its data; no resume data
+  is kept, so those files could never have been reused.
+
+Tests: `SourceSelectorTest` (torrent cases), `TorrentCoordinatorTest`.
+
+---
+
 ## Done log
 
 _(most recent first)_

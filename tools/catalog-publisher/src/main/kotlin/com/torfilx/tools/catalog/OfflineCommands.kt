@@ -88,10 +88,7 @@ class OfflineCommands(
         val pinned = CatalogPinning.pin(input.readBytes())
         output.absoluteFile.parentFile?.mkdirs()
         output.writeBytes(pinned.json)
-        out.println(
-            "${pinned.entries.size} titles in ${output.path}: ${pinned.newlyPinned} ids pinned now, " +
-                "${pinned.entries.size - pinned.newlyPinned} already pinned, ${pinned.unplayable} with no playable magnet",
-        )
+        out.println("${output.path}: ${CatalogPinning.describe(pinned)}")
         return CatalogPublisherCli.EXIT_OK
     }
 
@@ -108,8 +105,9 @@ class OfflineCommands(
         val publishedAt = args.long("published-at") ?: clock()
         val trackers = (if (args.flag("no-default-trackers")) emptyList() else DEFAULT_TRACKERS) + args.values("tracker")
 
-        val pinned = CatalogPinning.pin(input.readBytes())
-        out.println("Catalogue: ${pinned.entries.size} titles (${pinned.newlyPinned} ids pinned now, ${pinned.unplayable} unplayable)")
+        val pinned = CatalogPinning.pin(input.readBytes(), stripTrackers = args.flag("strip-trackers"))
+        out.println("Catalogue: ${CatalogPinning.describe(pinned)}")
+        printSize(pinned.json.size.toLong())
 
         val written = CatalogueReleaseWriter.write(pinned.json, version, publishedAt, seed, outDir, minVersionCode)
         val publicKey = Ed25519Keys.publicKeyOf(seed)
@@ -137,6 +135,7 @@ class OfflineCommands(
         out.println()
         out.println("Release ${manifest.catalogVersion} written to ${written.releaseRoot.path}")
         out.println("  titles        ${manifest.titleCount}")
+        manifest.episodeCount?.let { out.println("  episodes      $it") }
         out.println("  catalog.json  ${manifest.jsonBytes} bytes, ${manifest.gzBytes} bytes compressed")
         out.println("  sha256        ${manifest.sha256}")
         manifest.minVersionCode?.let { out.println("  needs app     build $it or later") }
@@ -146,6 +145,21 @@ class OfflineCommands(
         out.println()
         out.println("Next: publish --release ${written.releaseRoot.path} --seed <seed file>")
         return CatalogPublisherCli.EXIT_OK
+    }
+
+    /**
+     * How close the catalogue is to the size a television will load, on every build, so the limit is
+     * seen long before it is hit. Episodes add up quickly; the cheapest fix is `--strip-trackers`.
+     */
+    private fun printSize(jsonBytes: Long) {
+        val percent = jsonBytes * PERCENT / CatalogRelease.MAX_JSON_BYTES
+        out.println("  catalog.json is $jsonBytes bytes, $percent% of the ${CatalogRelease.MAX_JSON_BYTES}-byte limit")
+        if (jsonBytes >= CatalogRelease.MAX_JSON_BYTES * SIZE_WARNING_PERCENT / PERCENT) {
+            out.println(
+                "  warning: over $SIZE_WARNING_PERCENT% of the limit. Most of a catalogue is repeated tracker URLs; " +
+                    "--strip-trackers keeps ${MagnetTrackers.DEFAULT_KEEP} per magnet.",
+            )
+        }
     }
 
     // --- verify ----------------------------------------------------------------------------------
@@ -172,6 +186,11 @@ class OfflineCommands(
     }
 
     companion object {
+        private const val PERCENT = 100L
+
+        /** Past this share of the size limit, `build` suggests trimming trackers. */
+        const val SIZE_WARNING_PERCENT = 67L
+
         /** The same public trackers the app adds to every torrent. */
         val DEFAULT_TRACKERS = listOf(
             "udp://tracker.opentrackr.org:1337/announce",
@@ -193,15 +212,32 @@ object CatalogPinning {
         val entries: List<CatalogEntryDto>,
         /** Entries that had no explicit id until now. */
         val newlyPinned: Int,
-        /** Entries with no magnet the app would accept. Allowed, but worth knowing. */
+        /** Titles nothing can be played of: a film with no usable magnet, a show with no usable episode. */
         val unplayable: Int,
-    )
+        val shows: Int = 0,
+        val episodes: Int = 0,
+        /** Episodes that had no explicit id until now. */
+        val episodesPinned: Int = 0,
+        /** Episodes with no magnet the app would accept. Listed greyed in the app, but worth knowing. */
+        val unplayableEpisodes: Int = 0,
+    ) {
+        val films: Int get() = entries.size - shows
+    }
 
-    fun pin(input: ByteArray): Pinned {
-        val entries = CatalogueJson.content.decodeFromString(ListSerializer(CatalogEntryDto.serializer()), input.decodeToString())
-        val problems = CatalogContentRules.problems(entries, countDeclaredTitles(input), requireExplicitIds = false)
+    /**
+     * @param stripTrackers trim every magnet to [MagnetTrackers.DEFAULT_KEEP] trackers, preferring the
+     *   app's own, before anything is written.
+     */
+    fun pin(input: ByteArray, stripTrackers: Boolean = false): Pinned {
+        val decoded = CatalogueJson.content.decodeFromString(ListSerializer(CatalogEntryDto.serializer()), input.decodeToString())
+        val problems = CatalogContentRules.problems(decoded, countDeclaredTitles(input), requireExplicitIds = false)
         require(problems.isEmpty()) {
             "Fix these before the catalogue can be published:\n  " + problems.joinToString("\n  ")
+        }
+        val entries = if (stripTrackers) {
+            MagnetTrackers.stripAll(decoded, MagnetTrackers.DEFAULT_KEEP, OfflineCommands.DEFAULT_TRACKERS)
+        } else {
+            decoded
         }
         val pinned = CatalogIds.pin(entries)
         val json = CatalogueJson.catalogWriter
@@ -209,12 +245,38 @@ object CatalogPinning {
             .encodeToByteArray()
         val stillValid = CatalogContentRules.problems(pinned, countDeclaredTitles(json), requireExplicitIds = true)
         check(stillValid.isEmpty()) { "Pinning produced an unpublishable catalogue:\n  " + stillValid.joinToString("\n  ") }
+
+        val playable = { magnets: List<com.torfilx.core.catalogue.format.CatalogMagnetDto> -> magnets.any { MagnetLink.isValid(it.magnet) } }
+        val episodesBefore = entries.filter { it.isShow }.flatMap { show -> show.seasons.flatMap { it.episodes } }
+        val episodesAfter = pinned.filter { it.isShow }.flatMap { show -> show.seasons.flatMap { it.episodes } }
         return Pinned(
             json = json,
             entries = pinned,
             newlyPinned = entries.count { it.id == null },
-            unplayable = pinned.count { entry -> entry.magnets.none { MagnetLink.isValid(it.magnet) } },
+            unplayable = pinned.count { entry ->
+                if (entry.isShow) {
+                    entry.seasons.none { season -> season.packs.let(playable) || season.episodes.any { playable(it.magnets) } }
+                } else {
+                    !playable(entry.magnets)
+                }
+            },
+            shows = pinned.count { it.isShow },
+            episodes = episodesAfter.size,
+            episodesPinned = episodesBefore.count { it.id == null },
+            unplayableEpisodes = pinned.filter { it.isShow }.sumOf { show ->
+                show.seasons.sumOf { season -> if (playable(season.packs)) 0 else season.episodes.count { !playable(it.magnets) } }
+            },
         )
+    }
+
+    /** One line saying what the catalogue holds, for `pin` and `build`. */
+    fun describe(pinned: Pinned): String = buildString {
+        append("${pinned.entries.size} titles")
+        if (pinned.shows > 0) append(" (${pinned.films} films, ${pinned.shows} shows with ${pinned.episodes} episodes)")
+        append(": ${pinned.newlyPinned} ids pinned now, ${pinned.entries.size - pinned.newlyPinned} already pinned")
+        if (pinned.shows > 0) append(", ${pinned.episodesPinned} episode ids pinned now")
+        append(", ${pinned.unplayable} with no playable magnet")
+        if (pinned.unplayableEpisodes > 0) append(", ${pinned.unplayableEpisodes} episodes with no playable magnet")
     }
 }
 

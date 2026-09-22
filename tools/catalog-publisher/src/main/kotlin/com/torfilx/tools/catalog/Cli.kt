@@ -86,12 +86,14 @@ class CatalogPublisherCli(
             |           outside the repository and back it up: it signs every catalogue release.
             |  pubkey   --seed <seed file>
             |  pin      --catalog <catalog.json> [--out <file>]
-            |           Gives every title a permanent id (the id the app already derives), in place.
+            |           Gives every title and every episode a permanent id (the id the app already derives), in place.
             |  build    --catalog <catalog.json> --version <n> --seed <seed file> --out <dir>
             |           [--asset-dir <dir>] [--min-version-code <n>] [--published-at <epoch ms>]
-            |           [--tracker <url>]... [--no-default-trackers]
-            |           Pins ids, writes and signs release <n>, builds its torrent, and with --asset-dir
-            |           also writes the bundled catalog.json and catalog-manifest.json for the APK.
+            |           [--tracker <url>]... [--no-default-trackers] [--strip-trackers]
+            |           Pins ids (titles and episodes), writes and signs release <n>, builds its torrent, and
+            |           with --asset-dir also writes the bundled catalog.json and catalog-manifest.json for
+            |           the APK. --strip-trackers keeps 2 trackers per magnet. A release that adds the first
+            |           show needs --min-version-code set to the first app build that understands shows.
             |  verify   --dir <release directory> (--keys <hex,...> | --seed <seed file>) [--app-version-code <n>]
             |
             |Network (public DHT unless --private):
@@ -143,7 +145,7 @@ class Args private constructor(
 
     companion object {
         /** Options that take no value. */
-        private val FLAGS = setOf("force", "private", "no-default-trackers", "allow-inside-repo", "help")
+        private val FLAGS = setOf("force", "private", "no-default-trackers", "allow-inside-repo", "help", "strip-trackers")
 
         fun parse(argv: List<String>): Args {
             val command = argv.firstOrNull()?.takeIf { !it.startsWith("--") }

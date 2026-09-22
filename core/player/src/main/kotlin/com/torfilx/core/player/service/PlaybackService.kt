@@ -1,6 +1,10 @@
 package com.torfilx.core.player.service
 
 import android.content.Intent
+import androidx.annotation.OptIn
+import androidx.media3.common.ForwardingPlayer
+import androidx.media3.common.Player
+import androidx.media3.common.util.UnstableApi
 import androidx.media3.session.MediaSession
 import androidx.media3.session.MediaSessionService
 import com.torfilx.core.common.di.ApplicationScope
@@ -38,11 +42,15 @@ class PlaybackService : MediaSessionService() {
 
     private var mediaSession: MediaSession? = null
 
+    /** The player the session currently wraps, so a rebuilt player is noticed. */
+    private var boundPlayer: Player? = null
+
     override fun onCreate() {
         super.onCreate()
         runCatching {
             val player = playbackController.ensurePlayer()
-            mediaSession = MediaSession.Builder(this, player).build()
+            boundPlayer = player
+            mediaSession = MediaSession.Builder(this, sessionPlayer(player)).build()
             TorfilxLog.i(TAG, "Media session created")
         }.onFailure { TorfilxLog.e(TAG, "Could not create media session", it) }
 
@@ -51,12 +59,35 @@ class PlaybackService : MediaSessionService() {
         // player.
         playbackController.playerFlow
             .onEach { player ->
-                if (player != null && mediaSession?.player !== player) {
-                    runCatching { mediaSession?.player = player }
+                if (player != null && boundPlayer !== player) {
+                    boundPlayer = player
+                    runCatching { mediaSession?.player = sessionPlayer(player) }
                         .onFailure { TorfilxLog.w(TAG, "Could not rebind media session player", it) }
                 }
             }
             .launchIn(appScope)
+    }
+
+    /**
+     * The player as the session presents it: unchanged, except that "next" always exists and means the
+     * next episode. The player holds one item at a time, so left alone the session would report no next
+     * item and drop the remote's next key and "Alexa, next" on the floor.
+     */
+    @OptIn(UnstableApi::class)
+    private fun sessionPlayer(player: Player): Player = object : ForwardingPlayer(player) {
+        override fun getAvailableCommands(): Player.Commands = super.getAvailableCommands().buildUpon()
+            .add(Player.COMMAND_SEEK_TO_NEXT)
+            .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+            .build()
+
+        override fun isCommandAvailable(command: Int): Boolean =
+            command == Player.COMMAND_SEEK_TO_NEXT ||
+                command == Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM ||
+                super.isCommandAvailable(command)
+
+        override fun seekToNext() = playbackController.onMediaNext()
+
+        override fun seekToNextMediaItem() = playbackController.onMediaNext()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaSession? = mediaSession

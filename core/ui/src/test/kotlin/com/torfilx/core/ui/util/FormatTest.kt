@@ -49,6 +49,31 @@ class FormatTest {
     }
 
     @Test
+    fun `a show's meta line gives its seasons in place of a runtime`() {
+        val show = MediaItem(
+            id = "show-x-1959",
+            title = "Show",
+            year = 1959,
+            runtimeMs = 25 * minute, // ignored for a show
+            genres = listOf("Sci-Fi", "Drama"),
+            kind = com.torfilx.core.model.MediaKind.SHOW,
+            seasonCount = 5,
+            episodeCount = 156,
+        )
+        assertThat(Format.metaLine(show)).isEqualTo("1959 · 5 seasons · Sci-Fi, Drama")
+    }
+
+    @Test
+    fun `a single-season show counts its episodes, and an empty one says nothing`() {
+        val base = MediaItem(id = "s", title = "S", kind = com.torfilx.core.model.MediaKind.SHOW)
+        assertThat(Format.showLength(base.copy(seasonCount = 1, episodeCount = 8))).isEqualTo("8 episodes")
+        assertThat(Format.showLength(base.copy(seasonCount = 1, episodeCount = 1))).isEqualTo("1 episode")
+        assertThat(Format.showLength(base.copy(seasonCount = 0, episodeCount = 3))).isEqualTo("3 episodes")
+        assertThat(Format.showLength(base)).isEmpty()
+        assertThat(Format.metaLine(base)).isEmpty()
+    }
+
+    @Test
     fun `rating is hidden when the server sent nothing or zero`() {
         assertThat(Format.rating(8.44)).isEqualTo("8.4")
         assertThat(Format.rating(0.0)).isNull()

@@ -114,6 +114,17 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            // Next track: offer the next episode (or play it from its card). Handled here while the app
+            // is in front; the media session carries it otherwise, and for "Alexa, next".
+            KeyEvent.KEYCODE_MEDIA_NEXT -> {
+                if (playbackController.player != null) {
+                    playbackController.onMediaNext()
+                    true
+                } else {
+                    super.onKeyDown(keyCode, event)
+                }
+            }
+
             else -> super.onKeyDown(keyCode, event)
         }
     }

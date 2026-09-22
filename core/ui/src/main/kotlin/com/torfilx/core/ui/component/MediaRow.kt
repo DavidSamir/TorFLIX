@@ -39,6 +39,8 @@ fun MediaRow(
     landscape: Boolean = false,
     headerTrailing: @Composable (() -> Unit)? = null,
     totalItems: Int = items.size,
+    /** Where the rest of a capped row is browsed: "Movies", "Shows", or "Movies and Shows". */
+    seeAllIn: String = "Movies",
 ) {
     if (items.isEmpty()) return
     val dimens = LocalTorfilxDimens.current
@@ -51,7 +53,7 @@ fun MediaRow(
         // header says so and points at where the rest lives.
         RowHeader(
             title = title,
-            subtitle = if (totalItems > items.size) "${items.size} of $totalItems · all in Movies" else null,
+            subtitle = if (totalItems > items.size) "${items.size} of $totalItems · all in $seeAllIn" else null,
             trailing = headerTrailing,
         )
         LazyRow(

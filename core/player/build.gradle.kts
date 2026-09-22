@@ -19,4 +19,6 @@ dependencies {
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.media3.test.utils)
+    testImplementation(projects.core.testing)
+    testImplementation(testFixtures(projects.core.catalogue))
 }

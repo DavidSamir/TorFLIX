@@ -12,19 +12,14 @@ import com.torfilx.core.data.catalog.FetchedCatalogStore
 import com.torfilx.core.data.catalog.FixedAppVersion
 import com.torfilx.core.data.catalog.LayeredCatalog
 import com.torfilx.core.data.catalog.layeredCatalog
-import com.torfilx.core.data.database.MyListDao
-import com.torfilx.core.data.database.MyListEntity
-import com.torfilx.core.data.database.ProgressDao
 import com.torfilx.core.data.database.ProgressEntity
-import com.torfilx.core.data.database.SearchHistoryDao
-import com.torfilx.core.data.database.SearchHistoryEntity
 import com.torfilx.core.model.LibraryQuery
+import com.torfilx.core.testing.FakeMyListDao
+import com.torfilx.core.testing.FakeProgressDao
+import com.torfilx.core.testing.FakeShowStateDao
+import com.torfilx.core.testing.FakeSearchHistoryDao
 import com.torfilx.core.testing.FakeTimeProvider
 import kotlinx.coroutines.ExperimentalCoroutinesApi
-import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.flowOf
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
@@ -61,7 +56,7 @@ class MediaRepositoryGenerationTest {
         catalog.preload()
         val time = FakeTimeProvider()
         val progressDao = FakeProgressDao()
-        val progressRepository = ProgressRepository(progressDao, catalog, time)
+        val progressRepository = ProgressRepository(progressDao, catalog, time, FakeShowStateDao())
         val myListRepository = MyListRepository(FakeMyListDao(), time)
         val repository = MediaRepository(
             catalog = catalog,
@@ -171,43 +166,3 @@ class MediaRepositoryGenerationTest {
     }
 }
 
-private class FakeProgressDao : ProgressDao {
-    val rows = MutableStateFlow<List<ProgressEntity>>(emptyList())
-    override suspend fun upsert(progress: ProgressEntity) {
-        rows.value = rows.value.filterNot { it.itemId == progress.itemId } + progress
-    }
-    override suspend fun get(itemId: String): ProgressEntity? = rows.value.firstOrNull { it.itemId == itemId }
-    override fun observe(itemId: String): Flow<ProgressEntity?> = rows.map { list -> list.firstOrNull { it.itemId == itemId } }
-    override fun observeEverything(): Flow<List<ProgressEntity>> = rows
-    override suspend fun all(): List<ProgressEntity> = rows.value
-    override suspend fun delete(itemId: String) {
-        rows.value = rows.value.filterNot { it.itemId == itemId }
-    }
-    override suspend fun clear() {
-        rows.value = emptyList()
-    }
-}
-
-private class FakeMyListDao : MyListDao {
-    val entries = MutableStateFlow<List<MyListEntity>>(emptyList())
-    override suspend fun upsert(entry: MyListEntity) {
-        entries.value = entries.value.filterNot { it.itemId == entry.itemId } + entry
-    }
-    override fun observeAll(): Flow<List<MyListEntity>> = entries
-    override fun observeIds(): Flow<List<String>> = entries.map { list -> list.map { it.itemId } }
-    override suspend fun all(): List<MyListEntity> = entries.value
-    override suspend fun get(itemId: String): MyListEntity? = entries.value.firstOrNull { it.itemId == itemId }
-    override suspend fun hardDelete(itemId: String) {
-        entries.value = entries.value.filterNot { it.itemId == itemId }
-    }
-    override suspend fun clear() {
-        entries.value = emptyList()
-    }
-}
-
-private class FakeSearchHistoryDao : SearchHistoryDao {
-    override suspend fun insert(entry: SearchHistoryEntity) = Unit
-    override fun observeRecent(limit: Int): Flow<List<SearchHistoryEntity>> = flowOf(emptyList())
-    override suspend fun clear() = Unit
-    override suspend fun trim(keep: Int) = Unit
-}

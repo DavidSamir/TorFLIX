@@ -15,6 +15,8 @@ import com.torfilx.core.common.di.Dispatcher
 import com.torfilx.core.common.di.TorfilxDispatcher
 import com.torfilx.core.common.log.TorfilxLog
 import com.torfilx.core.model.CachedParts
+import com.torfilx.core.model.EpisodeFileMatcher
+import com.torfilx.core.model.FileSelection
 import com.torfilx.core.model.MagnetLink
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
@@ -276,7 +278,11 @@ class LibTorrentEngine @Inject constructor(
         }
     }
 
-    override suspend fun stream(magnet: String): TorrentStream = withContext(ioDispatcher) {
+    override suspend fun stream(
+        magnet: String,
+        selection: FileSelection,
+        displayName: String?,
+    ): TorrentStream = withContext(ioDispatcher) {
         if (!consentProvider.hasConsented()) throw TorrentError.NotConsented()
         val infoHash = MagnetLink.infoHashOf(magnet) ?: throw TorrentError.InvalidMagnet(magnet)
 
@@ -293,8 +299,23 @@ class LibTorrentEngine @Inject constructor(
 
         managedTorrents[infoHash]?.let { existing ->
             // Already in the session (possibly seeding): resume streaming from it rather than
-            // re-adding the torrent and re-checking every piece on disk.
+            // re-adding the torrent and re-checking every piece on disk. A season pack may be asked for
+            // a different episode than the one it last served: the file is switched in place.
+            val info = existing.handle.torrentFile() ?: throw TorrentError.MetadataTimeout()
+            val files = info.files()
+            val candidates = (0 until files.numFiles()).map { index ->
+                EpisodeFileMatcher.Candidate(index, files.filePath(index), files.fileSize(index))
+            }
+            val fileIndex = chooseVideoFile(candidates, selection) ?: throw TorrentError.NoPlayableFile()
+            if (fileIndex != existing.fileIndex) {
+                TorfilxLog.i(TAG, "Switching $infoHash from file ${existing.fileIndex} to ${files.filePath(fileIndex)}")
+                existing.select(selectedFile(files, fileIndex), files.numFiles())
+            }
             existing.isStreaming = true
+            displayName?.let { existing.displayName = it }
+            // A seeding torrent can have been paused (consent withdrawn, or the disk ran low). Streaming
+            // it again needs it downloading again; the free-space guard still stops it if it must.
+            runCatching { existing.handle.resume() }
             streamServer.register(existing)
             return@withContext existing.toStream(streamServer.port)
         }
@@ -333,11 +354,15 @@ class LibTorrentEngine @Inject constructor(
         val info = handle.torrentFile() ?: throw TorrentError.MetadataTimeout()
         val files = info.files()
 
-        // The video is the largest file; sample/subtitle files are ignored entirely.
-        val fileIndex = (0 until files.numFiles())
-            .filter { files.fileName(it).isVideoFile() }
-            .maxByOrNull { files.fileSize(it) }
-            ?: throw TorrentError.NoPlayableFile()
+        // The video is the largest file — or, for an episode, that episode's file (see
+        // chooseVideoFile). Sample and subtitle files are ignored entirely.
+        val candidates = (0 until files.numFiles()).map { index ->
+            EpisodeFileMatcher.Candidate(index, files.filePath(index), files.fileSize(index))
+        }
+        val fileIndex = chooseVideoFile(candidates, selection) ?: throw TorrentError.NoPlayableFile()
+        if (selection != FileSelection.LargestVideo) {
+            TorfilxLog.i(TAG, "Streaming ${files.filePath(fileIndex)} for $selection")
+        }
 
         val fileSize = files.fileSize(fileIndex)
         val free = freeSpaceBytes()
@@ -358,17 +383,15 @@ class LibTorrentEngine @Inject constructor(
         val streamed = StreamedTorrent(
             infoHash = infoHash,
             handle = handle,
-            fileIndex = fileIndex,
-            fileName = files.fileName(fileIndex),
-            fileSizeBytes = fileSize,
-            filePath = File(downloadDir, files.filePath(fileIndex)),
+            file = selectedFile(files, fileIndex),
             pieceLength = info.pieceLength(),
-            fileOffset = files.fileOffset(fileIndex),
             numPieces = info.numPieces(),
             lastTouchedMs = System.currentTimeMillis(),
+            displayName = displayName,
         )
         managedTorrents[infoHash] = streamed
         streamServer.register(streamed)
+        enforceHandleCap()
 
         // Prime the beginning of the file so playback can start without waiting for the whole thing.
         streamed.prioritiseFrom(0L)
@@ -389,6 +412,7 @@ class LibTorrentEngine @Inject constructor(
             runCatching { streamed.handle.pause() }
         }
         enforceStorageBudget()
+        enforceHandleCap()
     }
 
     override suspend fun remove(infoHash: String, deleteData: Boolean) = withContext(ioDispatcher) {
@@ -411,6 +435,15 @@ class LibTorrentEngine @Inject constructor(
             }.onFailure { TorfilxLog.w(TAG, "Could not remove torrent $infoHash", it) }
         }
     }
+
+    /** File [index] of a torrent, as the stream server and the piece maths need it. */
+    private fun selectedFile(files: org.libtorrent4j.FileStorage, index: Int) = SelectedFile(
+        index = index,
+        name = files.fileName(index),
+        sizeBytes = files.fileSize(index),
+        path = File(downloadDir, files.filePath(index)),
+        offset = files.fileOffset(index),
+    )
 
     private fun isFilmTorrent(handle: TorrentHandle): Boolean = runCatching {
         File(handle.savePath()).canonicalFile.startsWith(downloadDir.canonicalFile)
@@ -446,6 +479,21 @@ class LibTorrentEngine @Inject constructor(
     }
 
     /**
+     * Keeps the number of title torrents in the session within [HandleCap.MAX_TORRENTS], removing the
+     * oldest-touched ones that are not streaming — with their data, because a torrent gone from the
+     * session is invisible to [enforceStorageBudget] and its files could never be reclaimed.
+     */
+    private suspend fun enforceHandleCap() {
+        val entries = managedTorrents.values.map { t ->
+            HandleCap.Entry(t.infoHash, lastTouched[t.infoHash] ?: t.lastTouchedMs, t.isStreaming)
+        }
+        val surplus = HandleCap.surplus(entries)
+        if (surplus.isEmpty()) return
+        TorfilxLog.i(TAG, "${entries.size} torrents in the session; removing ${surplus.size} touched longest ago")
+        surplus.forEach { remove(it, deleteData = true) }
+    }
+
+    /**
      * Which parts of a title's video file are held on this device.
      *
      * Read on demand rather than polled. libtorrent's bitfield covers the whole torrent and is one
@@ -456,10 +504,12 @@ class LibTorrentEngine @Inject constructor(
      */
     override fun cachedParts(infoHash: String, buckets: Int): CachedParts? {
         val streamed = managedTorrents[infoHash] ?: return null
+        // One file throughout: a season pack can switch episodes while this is being read.
+        val file = streamed.selected
         return runCatching {
             val range = filePieceRange(
-                fileOffset = streamed.fileOffset,
-                fileSizeBytes = streamed.fileSizeBytes,
+                fileOffset = file.offset,
+                fileSizeBytes = file.sizeBytes,
                 pieceLength = streamed.pieceLength,
                 numPieces = streamed.numPieces,
             )
@@ -479,9 +529,9 @@ class LibTorrentEngine @Inject constructor(
                 // Capped at the file size so a part-piece at each end cannot read as >100%.
                 haveBytes = minOf(
                     havePieces.toLong() * streamed.pieceLength,
-                    streamed.fileSizeBytes,
+                    file.sizeBytes,
                 ),
-                totalBytes = streamed.fileSizeBytes,
+                totalBytes = file.sizeBytes,
             )
         }.getOrElse {
             TorfilxLog.w(TAG, "Could not read the piece map for $infoHash", it)
@@ -618,7 +668,7 @@ class LibTorrentEngine @Inject constructor(
         val status = handle.status()
         TorrentStatus(
             infoHash = streamed.infoHash,
-            name = streamed.fileName,
+            name = streamed.displayName ?: streamed.fileName,
             progress = status.progress(),
             downloadRateBytesPerSecond = status.downloadRate(),
             uploadRateBytesPerSecond = status.uploadRate(),
@@ -691,11 +741,6 @@ class LibTorrentEngine @Inject constructor(
         dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
     }.getOrDefault(0L)
 
-    private fun String.isVideoFile(): Boolean {
-        val lower = lowercase()
-        return VIDEO_EXTENSIONS.any { lower.endsWith(it) }
-    }
-
     private companion object {
         const val CATALOGUE_TAG = "CatalogSwarm"
 
@@ -730,7 +775,6 @@ class LibTorrentEngine @Inject constructor(
         const val POLL_INTERVAL_MS = 250L
         const val STATUS_POLL_MS = 1_000L
         const val DHT_STATE_SAVE_INTERVAL_MS = 10 * 60_000L
-        val VIDEO_EXTENSIONS = listOf(".mp4", ".mkv", ".avi", ".mov", ".m4v", ".webm", ".mpg", ".mpeg")
     }
 }
 

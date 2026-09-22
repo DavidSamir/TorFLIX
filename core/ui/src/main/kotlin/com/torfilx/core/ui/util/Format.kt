@@ -42,13 +42,28 @@ object Format {
         }
     }
 
-    /** Meta line for details/hero: `2024 · 2h 14m · 16+ · Action, Sci-Fi`. */
+    /**
+     * Meta line for details/hero: `2024 · 2h 14m · 16+ · Action, Sci-Fi` for a film, and
+     * `1959 · 5 seasons · Sci-Fi, Drama` for a show, whose length is its seasons, not a runtime.
+     */
     fun metaLine(item: MediaItem, maxGenres: Int = 2): String = buildList {
         item.year?.let { add(it.toString()) }
-        runtime(item.runtimeMs).takeIf { it.isNotEmpty() }?.let { add(it) }
+        val length = if (item.isShow) showLength(item) else runtime(item.runtimeMs)
+        length.takeIf { it.isNotEmpty() }?.let { add(it) }
         item.ageRating?.takeIf { it.isNotBlank() }?.let { add(it) }
         item.genres.take(maxGenres).takeIf { it.isNotEmpty() }?.let { add(it.joinToString(", ")) }
     }.joinToString(" · ")
+
+    /**
+     * `5 seasons`, or `8 episodes` for a single-season show (where "1 season" says nothing), or
+     * empty when the catalogue gave no episodes at all.
+     */
+    fun showLength(item: MediaItem): String = when {
+        item.seasonCount >= 2 -> "${item.seasonCount} seasons"
+        item.episodeCount == 1 -> "1 episode"
+        item.episodeCount > 1 -> "${item.episodeCount} episodes"
+        else -> ""
+    }
 
     /** `8.4` rating badge text, or null when the server gave no rating. */
     fun rating(value: Double?): String? =

@@ -92,12 +92,16 @@ fun LibraryScreen(
             }
 
             state.isEmpty -> EmptyState(
-                title = when (state.mode) {
-                    LibraryMode.MY_LIST -> "My List is empty"
-                    LibraryMode.MOVIES -> "No movies match these filters"
+                title = when {
+                    state.mode == LibraryMode.MY_LIST -> "My List is empty"
+                    state.mode == LibraryMode.SHOWS && state.isUnfiltered -> "No shows yet"
+                    state.mode == LibraryMode.SHOWS -> "No shows match these filters"
+                    else -> "No movies match these filters"
                 },
-                message = when (state.mode) {
-                    LibraryMode.MY_LIST -> "Press the Menu button on any title to add it here."
+                message = when {
+                    state.mode == LibraryMode.MY_LIST -> "Press the Menu button on any title to add it here."
+                    state.mode == LibraryMode.SHOWS && state.isUnfiltered ->
+                        "The catalogue on this TV has no shows. New ones arrive with catalogue updates."
                     else -> "Try clearing the genre or watched filter."
                 },
                 actionLabel = "Refresh",
@@ -179,7 +183,8 @@ private fun FilterBar(
         if (!state.isLoading) {
             Text(
                 text = buildString {
-                    append(if (state.cards.size == 1) "1 title" else "${state.cards.size} titles")
+                    val noun = if (state.mode == LibraryMode.SHOWS) "show" else "title"
+                    append(if (state.cards.size == 1) "1 $noun" else "${state.cards.size} ${noun}s")
                     if (appVersion.isNotEmpty()) append(" · v").append(appVersion)
                     if (state.catalogueVersion > 0) append(" · catalogue ").append(state.catalogueVersion)
                 },

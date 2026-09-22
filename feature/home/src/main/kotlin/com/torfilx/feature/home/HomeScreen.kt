@@ -24,6 +24,7 @@ import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import com.torfilx.core.model.HeroItem
 import com.torfilx.core.model.HomeRowKind
 import com.torfilx.core.model.MediaCard
 import com.torfilx.core.model.PlayAction
@@ -122,14 +123,10 @@ private fun HomeContent(
         ) {
             if (state.hero.isNotEmpty()) {
                 item(key = "hero", contentType = "hero") {
+                    val heroByCard = state.hero.associateBy { it.card.playableId }
                     HeroSection(
                         items = state.hero.map { it.card },
-                        primaryActionLabel = { card ->
-                            when {
-                                card.progress?.let { it.fraction > 0f && !it.watched } == true -> "▶ Resume"
-                                else -> "▶ Play"
-                            }
-                        },
+                        primaryActionLabel = { card -> heroByCard[card.playableId]?.let(::heroLabel) ?: "▶ Play" },
                         onPlay = onPlay,
                         onMoreInfo = onCardClick,
                         onToggleMyList = onToggleMyList,
@@ -157,6 +154,7 @@ private fun HomeContent(
                     title = row.title,
                     items = row.items,
                     totalItems = row.totalItems,
+                    seeAllIn = row.seeAllIn,
                     landscape = row.kind == HomeRowKind.CONTINUE_WATCHING,
                     onCardClick = { card ->
                         if (row.kind == HomeRowKind.CONTINUE_WATCHING) onPlay(card) else onCardClick(card)
@@ -203,5 +201,24 @@ private fun HomeSkeleton() {
         SkeletonRow(landscape = true, count = 4)
         SkeletonRow(count = 6)
         SkeletonRow(count = 6)
+    }
+}
+
+/**
+ * The hero's play button: what it will actually do, taken from the resolved action.
+ *
+ * "▶ Resume S2 E3" for a show says which episode; a film just says "▶ Resume". Nothing playable reads
+ * "Details", because that is where the button then goes.
+ */
+internal fun heroLabel(hero: HeroItem): String {
+    val code = hero.card.episode?.code
+    return when (val action = hero.action) {
+        PlayAction.Unavailable -> "Details"
+        is PlayAction.Resume -> if (code != null) "▶ Resume $code" else "▶ Resume"
+        is PlayAction.Play -> when {
+            action.restart -> "▶ Play again"
+            code != null -> "▶ Play $code"
+            else -> "▶ Play"
+        }
     }
 }

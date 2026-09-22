@@ -1,6 +1,7 @@
 package com.torfilx.core.player
 
 import com.torfilx.core.model.AudioTrackInfo
+import com.torfilx.core.model.Episode
 import com.torfilx.core.model.Markers
 import com.torfilx.core.model.MediaItem
 import com.torfilx.core.model.SpriteSheet
@@ -96,12 +97,40 @@ data class PlayerUiState(
      * left for the viewer to work out.
      */
     val audioUnavailableReason: String? = null,
+    /** The episode playing, when it is one; its show is [item]. */
+    val episode: Episode? = null,
+    /** What the player offers after an episode ends; null while playing and for films. */
+    val endCard: EndCard? = null,
 ) {
     val canSeek: Boolean get() = durationMs > 0 && error == null
     val remainingMs: Long get() = (durationMs - positionMs).coerceAtLeast(0)
 
     /** Seconds of video already downloaded ahead of the play head. */
     val bufferedAheadMs: Long get() = (bufferedPositionMs - positionMs).coerceAtLeast(0)
+}
+
+/** The card over the final frame of an episode. See [com.torfilx.core.model.EndOfEpisode]. */
+sealed interface EndCard {
+    /** Autoplay: [next] starts when [secondsLeft] reaches zero, or at once on "Play now". */
+    data class Countdown(val next: Episode, val secondsLeft: Int) : EndCard
+
+    /**
+     * [next] waits for the viewer: autoplay is off, or the countdown was cut short by leaving the app.
+     *
+     * [midEpisode] when the viewer asked for it with the remote's next key before this episode ended:
+     * the episode is paused behind the card, and dismissing the card goes back to it rather than
+     * leaving the player.
+     */
+    data class Next(val next: Episode, val midEpisode: Boolean = false) : EndCard
+
+    /** The show is over. [first] is where "Watch again" starts; null when nothing can play. */
+    data class EndOfShow(val showTitle: String, val first: Episode?) : EndCard
+
+    /** The next episode has no source. */
+    data class NextUnavailable(val next: Episode) : EndCard
+
+    /** A special ended, or the show left the catalogue while it played. */
+    data object BackToShow : EndCard
 }
 
 /**
@@ -120,6 +149,8 @@ data class StreamStats(
 internal data class ResolvedPlayback(
     val playableId: String,
     val item: MediaItem?,
+    /** Set when [playableId] is an episode; [item] is then its show. */
+    val episode: Episode? = null,
     val subtitles: List<SubtitleTrack>,
     val audio: List<AudioTrackInfo>,
     val markers: Markers,

@@ -44,9 +44,11 @@ import androidx.media3.ui.PlayerView
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.torfilx.core.player.AspectMode
+import com.torfilx.core.player.EndCard
 import com.torfilx.core.player.PlaybackError
 import com.torfilx.core.player.PlayerUiState
 import com.torfilx.core.ui.component.ErrorState
+import com.torfilx.core.ui.component.NextEpisodeCard
 import com.torfilx.core.ui.component.SharingConsentDialog
 import com.torfilx.core.ui.component.TvButton
 import com.torfilx.core.ui.component.TvChip
@@ -90,7 +92,13 @@ fun PlayerScreen(
     // Keep the screen awake while playing OR waiting for data, but let it sleep when genuinely
     // paused/idle. The window flag is authoritative; PlayerView no longer forces it on unconditionally.
     KeepScreenOn(active = state.isPlaying || state.isBuffering || state.isLoading)
-    PauseWhenBackgrounded(onBackground = viewModel::onBackground)
+    PauseWhenBackgrounded(onBackground = viewModel::onBackground, onForeground = viewModel::onForeground)
+    val modalUp = state.endCard != null || state.showStillWatching
+
+    // The end card sits over the last frame on its own; the controls would only compete for focus.
+    LaunchedEffect(state.endCard != null) {
+        if (state.endCard != null) viewModel.hideControls()
+    }
 
     // Commit an accumulated seek once the user stops pressing the key.
     LaunchedEffect(pendingSeek) {
@@ -119,8 +127,10 @@ fun PlayerScreen(
     // The request is retried: a FocusRequester whose node is not yet attached — which is exactly the
     // case in the frame where the overlay is leaving composition — throws, and a single silent
     // failure here is indistinguishable from a broken remote.
-    LaunchedEffect(controlsVisible) {
-        if (controlsVisible) return@LaunchedEffect
+    // Not while a card or "still watching" is up: their buttons hold focus, and pulling it back to the
+    // root would leave OK doing nothing on a screen that is asking a question.
+    LaunchedEffect(controlsVisible, modalUp) {
+        if (controlsVisible || modalUp) return@LaunchedEffect
         repeat(FOCUS_RESTORE_ATTEMPTS) { attempt ->
             if (runCatching { rootFocus.requestFocus() }.isSuccess) return@LaunchedEffect
             delay(FOCUS_RESTORE_RETRY_MS * (attempt + 1))
@@ -133,7 +143,9 @@ fun PlayerScreen(
     }
 
     BackHandler(enabled = true) {
-        if (controlsVisible) {
+        if ((state.endCard as? EndCard.Next)?.midEpisode == true) {
+            viewModel.dismissNextEpisodeCard()
+        } else if (controlsVisible) {
             viewModel.hideControls()
         } else {
             viewModel.leavePlayer()
@@ -149,6 +161,12 @@ fun PlayerScreen(
             .focusable()
             .onRemoteKey { key, isKeyDown, _ ->
                 if (!isKeyDown) return@onRemoteKey false
+                // With a card or "still watching" up, the D-pad and OK belong to its buttons. A key on the
+                // end card still says someone is there; "still watching" must be answered by its buttons.
+                if (modalUp) {
+                    if (!state.showStillWatching) viewModel.noteUserInput()
+                    return@onRemoteKey false
+                }
                 viewModel.noteUserInput()
                 when (key) {
                     // ←/→ seek only while the overlay is hidden. With the overlay up they belong to
@@ -251,6 +269,24 @@ fun PlayerScreen(
                     viewModel.leavePlayer()
                     onExit()
                 },
+            )
+            return@Box
+        }
+
+        // An episode has ended: what comes next, over its last frame.
+        state.endCard?.let { card ->
+            EpisodeEndCard(
+                card = card,
+                onPlayNext = viewModel::playNext,
+                onWatchAgain = viewModel::watchAgain,
+                onKeepWatching = viewModel::dismissNextEpisodeCard,
+                onBack = {
+                    viewModel.leavePlayer()
+                    onExit()
+                },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 64.dp, bottom = 64.dp),
             )
             return@Box
         }
@@ -440,6 +476,72 @@ private fun PlayerErrorOverlay(
         secondaryActionLabel = "Back",
         onSecondaryAction = onExit,
     )
+}
+
+/**
+ * The card over an episode's last frame: the next episode, the end of the show, or why nothing
+ * follows. Its first button takes focus, so OK does the expected thing: play on, or leave.
+ */
+@Composable
+private fun EpisodeEndCard(
+    card: EndCard,
+    onPlayNext: () -> Unit,
+    onWatchAgain: () -> Unit,
+    onKeepWatching: () -> Unit,
+    onBack: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    when (card) {
+        is EndCard.Countdown -> NextEpisodeCard(
+            headline = "Next episode in ${card.secondsLeft} s",
+            title = "${card.next.code} · ${card.next.displayName}",
+            primaryLabel = "▶ Play now",
+            onPrimary = onPlayNext,
+            secondaryLabel = "Back",
+            onSecondary = onBack,
+            modifier = modifier,
+        )
+
+        is EndCard.Next -> NextEpisodeCard(
+            headline = "Next episode",
+            title = "${card.next.code} · ${card.next.displayName}",
+            primaryLabel = "▶ Play",
+            onPrimary = onPlayNext,
+            secondaryLabel = if (card.midEpisode) "Keep watching" else "Back",
+            onSecondary = if (card.midEpisode) onKeepWatching else onBack,
+            modifier = modifier,
+        )
+
+        is EndCard.EndOfShow -> {
+            val first = card.first
+            NextEpisodeCard(
+                headline = "You've reached the end",
+                title = card.showTitle.takeIf { it.isNotBlank() },
+                primaryLabel = "Back",
+                onPrimary = onBack,
+                secondaryLabel = first?.let { "Watch again from ${it.code}" },
+                onSecondary = if (first != null) onWatchAgain else null,
+                modifier = modifier,
+            )
+        }
+
+        is EndCard.NextUnavailable -> NextEpisodeCard(
+            headline = "${card.next.code} isn't available",
+            title = card.next.displayName,
+            detail = "The catalogue has no source for it yet.",
+            primaryLabel = "Back",
+            onPrimary = onBack,
+            modifier = modifier,
+        )
+
+        EndCard.BackToShow -> NextEpisodeCard(
+            headline = "That's the end of this episode",
+            title = null,
+            primaryLabel = "Back",
+            onPrimary = onBack,
+            modifier = modifier,
+        )
+    }
 }
 
 @Composable
@@ -694,11 +796,15 @@ private fun KeepScreenOn(active: Boolean) {
 
 /** A TV video app pauses when it loses the screen — it never plays invisibly (plan.md §7.6). */
 @Composable
-private fun PauseWhenBackgrounded(onBackground: () -> Unit) {
+private fun PauseWhenBackgrounded(onBackground: () -> Unit, onForeground: () -> Unit) {
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_STOP) onBackground()
+            when (event) {
+                Lifecycle.Event.ON_STOP -> onBackground()
+                Lifecycle.Event.ON_START -> onForeground()
+                else -> Unit
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }

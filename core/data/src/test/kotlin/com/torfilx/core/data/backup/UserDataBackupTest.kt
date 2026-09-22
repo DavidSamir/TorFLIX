@@ -5,6 +5,8 @@ import com.torfilx.core.data.database.MyListDao
 import com.torfilx.core.data.database.MyListEntity
 import com.torfilx.core.data.database.ProgressDao
 import com.torfilx.core.data.database.ProgressEntity
+import com.torfilx.core.data.database.ShowStateEntity
+import com.torfilx.core.testing.FakeShowStateDao
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
@@ -15,8 +17,8 @@ import org.junit.Test
 
 class UserDataBackupTest {
 
-    private fun backupFor(p: ProgressDao, m: MyListDao) =
-        UserDataBackup(p, m, Json, UnconfinedTestDispatcher())
+    private fun backupFor(p: ProgressDao, m: MyListDao, s: FakeShowStateDao = FakeShowStateDao()) =
+        UserDataBackup(p, m, s, Json, UnconfinedTestDispatcher())
 
     @Test
     fun `export then import into an empty store restores everything`() = runTest {
@@ -61,6 +63,63 @@ class UserDataBackupTest {
 
         assertThat(local.rows["a"]?.positionMs).isEqualTo(8000) // newer backup applied
     }
+
+    // --- Formats ---------------------------------------------------------------------------------
+
+    @Test
+    fun `a format 1 backup, written before shows existed, still imports`() = runTest {
+        // Exactly what format 1 builds wrote: no version field (it equalled its default), no show states.
+        val format1 = """{"progress":[{"itemId":"a","positionMs":1000,"durationMs":5000,"watched":false,"updatedAtMs":10}],""" +
+            """"myList":[{"itemId":"x","addedAtMs":100}]}"""
+        val progress = FakeProgressDao()
+        val list = FakeMyListDao()
+        val states = FakeShowStateDao()
+
+        val result = backupFor(progress, list, states).importFromJson(format1)
+
+        assertThat(result).isEqualTo(UserDataBackup.Result(progressRestored = 1, myListRestored = 1, showStatesRestored = 0))
+        assertThat(progress.rows["a"]?.positionMs).isEqualTo(1000)
+        assertThat(list.rows).containsKey("x")
+        assertThat(states.states.value).isEmpty()
+
+        // An explicit version 1 reads the same way.
+        assertThat(backupFor(FakeProgressDao(), FakeMyListDao()).importFromJson("""{"version":1,"progress":[]}""").progressRestored)
+            .isEqualTo(0)
+    }
+
+    @Test
+    fun `export writes format 2, and a dismissed up-next card round-trips`() = runTest {
+        val source = FakeShowStateDao().apply { upsert(ShowStateEntity("show-a-1950", "show-a-1950-s01e02", 50)) }
+        val json = backupFor(FakeProgressDao(), FakeMyListDao(), source).exportToJson()
+        assertThat(json).contains("\"version\":2")
+
+        val target = FakeShowStateDao()
+        val result = backupFor(FakeProgressDao(), FakeMyListDao(), target).importFromJson(json)
+
+        assertThat(result.showStatesRestored).isEqualTo(1)
+        assertThat(target.states.value).containsExactly(ShowStateEntity("show-a-1950", "show-a-1950-s01e02", 50))
+    }
+
+    @Test
+    fun `import keeps a newer local show state, and applies an older local one's replacement`() = runTest {
+        val backupJson = backupFor(
+            FakeProgressDao(),
+            FakeMyListDao(),
+            FakeShowStateDao().apply {
+                upsert(ShowStateEntity("newer-here", "from-backup", 100))
+                upsert(ShowStateEntity("older-here", "from-backup", 100))
+            },
+        ).exportToJson()
+
+        val local = FakeShowStateDao().apply {
+            upsert(ShowStateEntity("newer-here", "local", 200))
+            upsert(ShowStateEntity("older-here", "local", 50))
+        }
+        backupFor(FakeProgressDao(), FakeMyListDao(), local).importFromJson(backupJson)
+
+        assertThat(local.states.value.associate { it.showId to it.dismissedAfterEpisodeId })
+            .containsExactly("newer-here", "local", "older-here", "from-backup")
+    }
 }
 
 private class FakeProgressDao : ProgressDao {
@@ -72,6 +131,8 @@ private class FakeProgressDao : ProgressDao {
     override suspend fun all(): List<ProgressEntity> = rows.values.toList()
     override suspend fun delete(itemId: String) { rows.remove(itemId) }
     override suspend fun clear() { rows.clear() }
+    override suspend fun upsertAll(rows: List<ProgressEntity>) { rows.forEach { upsert(it) } }
+    override suspend fun deleteIn(itemIds: List<String>) { itemIds.forEach { rows.remove(it) } }
 }
 
 private class FakeMyListDao : MyListDao {

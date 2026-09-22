@@ -11,6 +11,7 @@ import com.torfilx.core.data.repository.ProgressRepository
 import com.torfilx.core.model.LibraryQuery
 import com.torfilx.core.model.LibrarySort
 import com.torfilx.core.model.MediaCard
+import com.torfilx.core.model.MediaKind
 import com.torfilx.core.model.WatchedFilter
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -27,7 +28,14 @@ import javax.inject.Inject
 private const val TAG = "Library"
 
 /** Browse mode: the Movies tab, the Shows tab, or My List (same grid, different source). */
-enum class LibraryMode { MOVIES, MY_LIST }
+enum class LibraryMode(
+    /** The kind of title the grid holds; null for My List, which holds films and shows alike. */
+    val kind: MediaKind?,
+) {
+    MOVIES(MediaKind.MOVIE),
+    SHOWS(MediaKind.SHOW),
+    MY_LIST(null),
+}
 
 data class LibraryUiState(
     val mode: LibraryMode = LibraryMode.MOVIES,
@@ -40,6 +48,9 @@ data class LibraryUiState(
     val catalogueVersion: Long = 0,
 ) {
     val isEmpty: Boolean get() = !isLoading && cards.isEmpty()
+
+    /** No genre and no watched filter: an empty grid then means there is nothing of this kind at all. */
+    val isUnfiltered: Boolean get() = query.genre == null && query.watched == WatchedFilter.ALL
 }
 
 @HiltViewModel
@@ -63,7 +74,7 @@ class LibraryViewModel @Inject constructor(
     private val cards = combine(mode, query) { currentMode, currentQuery ->
         currentMode to currentQuery
     }.flatMapLatest { (currentMode, effectiveQuery) ->
-        val source = mediaRepository.observeLibrary(effectiveQuery)
+        val source = mediaRepository.observeLibrary(effectiveQuery.copy(kind = currentMode.kind))
         if (currentMode == LibraryMode.MY_LIST) {
             combine(source, myListRepository.itemIds) { items, myList ->
                 items.filter { it.item.id in myList }
@@ -94,12 +105,19 @@ class LibraryViewModel @Inject constructor(
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), LibraryUiState())
 
     init {
-        // Genres come from the catalogue in use, so they are read again whenever a newer one is
-        // swapped in; a genre chip must never offer a genre the grid no longer has.
+        // Genres come from the catalogue in use and the tab's kind, so they are read again whenever a
+        // newer catalogue is swapped in or the mode changes; a genre chip must never offer a genre the
+        // grid does not have. A genre the new list lacks is cleared rather than left filtering to nothing.
         viewModelScope.launch {
-            mediaRepository.observeCatalogue()
-                .distinctUntilChangedBy { it.generation }
-                .collect { genres.value = mediaRepository.genres() }
+            combine(
+                mediaRepository.observeCatalogue().distinctUntilChangedBy { it.generation },
+                mode,
+            ) { _, currentMode -> currentMode }
+                .collect { currentMode ->
+                    val available = mediaRepository.genres(currentMode.kind)
+                    genres.value = available
+                    query.value.genre?.let { chosen -> if (chosen !in available) setGenre(null) }
+                }
         }
         refresh()
     }
@@ -126,7 +144,7 @@ class LibraryViewModel @Inject constructor(
 
     fun markWatched(card: MediaCard, watched: Boolean) {
         viewModelScope.launch {
-            progressRepository.markWatched(card.playableId, card.item.runtimeMs, watched)
+            progressRepository.markWatched(card.playableId, card.runtimeMs, watched)
         }
     }
 
@@ -137,7 +155,7 @@ class LibraryViewModel @Inject constructor(
     fun refresh() {
         viewModelScope.launch {
             loading.value = true
-            genres.value = mediaRepository.genres()
+            genres.value = mediaRepository.genres(mode.value.kind)
             errorMessage.value = null
             loading.value = false
         }

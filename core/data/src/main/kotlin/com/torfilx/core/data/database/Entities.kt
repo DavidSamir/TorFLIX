@@ -66,3 +66,22 @@ data class ContributionDayEntity(
     val uploadedBytes: Long,
     val downloadedBytes: Long,
 )
+
+/**
+ * What this device remembers about a show beyond its episodes' progress.
+ *
+ * Today that is one thing: the "up next" card the viewer removed from Continue Watching. The card is
+ * derived from progress (the episode after the last one finished), so removing it cannot delete a
+ * row the way removing a film's card does — the dismissal itself has to be stored. It names the
+ * finished episode the card followed and is stamped with when it was made, so finishing any episode
+ * after that brings the card back for the episode after it.
+ *
+ * Keyed by show id; a row for a show the catalogue no longer carries is dormant, as progress is.
+ */
+@Entity(tableName = "show_state")
+data class ShowStateEntity(
+    @PrimaryKey val showId: String,
+    /** The finished episode whose "up next" card was dismissed; null when nothing is dismissed. */
+    val dismissedAfterEpisodeId: String?,
+    val updatedAtMs: Long,
+)

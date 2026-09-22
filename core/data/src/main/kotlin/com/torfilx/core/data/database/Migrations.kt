@@ -47,3 +47,24 @@ val MIGRATION_1_2 = object : Migration(1, 2) {
         )
     }
 }
+
+/**
+ * 2 → 3: per-show state, for dismissing an "up next" card from Continue Watching.
+ *
+ * Additive again — one new table, nothing existing touched. `dismissedAfterEpisodeId` is nullable so
+ * later per-show state can live in the same row without a dismissal.
+ */
+val MIGRATION_2_3 = object : Migration(2, 3) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `show_state` (
+                `showId` TEXT NOT NULL,
+                `dismissedAfterEpisodeId` TEXT,
+                `updatedAtMs` INTEGER NOT NULL,
+                PRIMARY KEY(`showId`)
+            )
+            """.trimIndent(),
+        )
+    }
+}

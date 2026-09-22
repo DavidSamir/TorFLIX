@@ -61,6 +61,7 @@ class TorrentStreamServerTest {
     private class FakeSource(
         override val infoHash: String,
         override val filePath: File,
+        override val fileIndex: Int = 0,
         override val fileSizeBytes: Long,
         val availableBytes: AtomicLong,
         val fileVisible: AtomicBoolean = AtomicBoolean(true),
@@ -248,5 +249,98 @@ class TorrentStreamServerTest {
         }
         results.forEach { it.join(10_000) }
         results.forEach { assertThat(it.isAlive).isFalse() }
+    }
+
+    // --- A torrent whose file changes: a season pack playing one episode, then the next ------------
+
+    /**
+     * Two files in one torrent, like a two-episode season pack. [select] switches what is served, and
+     * [view] pins one response to the file it began on, exactly as the real torrent does.
+     */
+    private class SwitchingSource(
+        override val infoHash: String,
+        private val files: List<File>,
+        val available: List<AtomicLong>,
+    ) : StreamSource {
+        @Volatile
+        var current = 0
+
+        fun select(index: Int) {
+            current = index
+        }
+
+        override val fileIndex: Int get() = current
+        override val fileName: String get() = files[current].name
+        override val fileSizeBytes: Long get() = files[current].length()
+        override val filePath: File get() = files[current]
+        override fun isReadableAt(fileByteOffset: Long) = view().isReadableAt(fileByteOffset)
+        override fun bytesUntilPieceEnd(fileByteOffset: Long) = view().bytesUntilPieceEnd(fileByteOffset)
+        override fun prioritiseFrom(fileByteOffset: Long) = Unit
+        override fun touch() = Unit
+
+        override fun view(): StreamSource = FileView(current)
+
+        private inner class FileView(private val index: Int) : StreamSource {
+            override val infoHash: String get() = this@SwitchingSource.infoHash
+            override val fileIndex: Int get() = index
+            override val fileName: String get() = files[index].name
+            override val fileSizeBytes: Long get() = files[index].length()
+            override val filePath: File get() = files[index]
+            override fun isReadableAt(fileByteOffset: Long) = fileByteOffset < available[index].get()
+            override fun bytesUntilPieceEnd(fileByteOffset: Long) = (available[index].get() - fileByteOffset).coerceAtLeast(1L)
+            override fun prioritiseFrom(fileByteOffset: Long) = Unit
+            override fun touch() = Unit
+        }
+    }
+
+    private val episodeOne = ByteArray(4096) { (it % 7).toByte() }
+    private val episodeTwo = ByteArray(6144) { (it % 11 + 100).toByte() }
+
+    private fun registerPack(available: Long = Long.MAX_VALUE): SwitchingSource {
+        val one = temp.newFile("Show.S01E01.mkv").apply { writeBytes(episodeOne) }
+        val two = temp.newFile("Show.S01E02.mkv").apply { writeBytes(episodeTwo) }
+        return SwitchingSource("pack1", listOf(one, two), listOf(AtomicLong(available), AtomicLong(available)))
+            .also(server::register)
+    }
+
+    @Test
+    fun `a request naming the file being served gets that file`() {
+        registerPack()
+        val connection = open(path = "pack1/0/Show.S01E01.mkv")
+        assertThat(connection.responseCode).isEqualTo(200)
+        assertThat(connection.readExactly(episodeOne.size)).isEqualTo(episodeOne)
+    }
+
+    @Test
+    fun `after a switch the new file is served, and a request for the old one is refused`() {
+        val pack = registerPack()
+        pack.select(1)
+
+        assertThat(open(path = "pack1/0/Show.S01E01.mkv").responseCode).isEqualTo(404)
+        val connection = open(path = "pack1/1/Show.S01E02.mkv")
+        assertThat(connection.responseCode).isEqualTo(200)
+        assertThat(connection.readExactly(episodeTwo.size)).isEqualTo(episodeTwo)
+    }
+
+    @Test
+    fun `a response keeps reading the file it started on when the torrent switches under it`() {
+        // Only the first 1 KB of episode one has arrived when the request starts.
+        val pack = registerPack(available = 1024)
+        val body = ByteArray(episodeOne.size)
+        val reader = Thread {
+            val connection = open(path = "pack1/0/Show.S01E01.mkv")
+            check(connection.responseCode == 200)
+            DataInputStream(connection.inputStream).use { it.readFully(body) }
+        }
+        reader.start()
+        Thread.sleep(300)
+
+        // The torrent moves on to episode two mid-response; then the rest of episode one arrives.
+        pack.select(1)
+        pack.available[0].set(Long.MAX_VALUE)
+        reader.join(10_000)
+
+        assertThat(reader.isAlive).isFalse()
+        assertThat(body).isEqualTo(episodeOne)
     }
 }

@@ -41,7 +41,15 @@ data class MediaSource(
     val magnetUri: String? = null,
     /** Human label for the source picker, e.g. "Torrent · 1080p". */
     val label: String? = null,
-)
+    /**
+     * Set for a season pack: the one file of the torrent this source plays. Null for a film's or an
+     * episode's own torrent, whose file the player chooses (see [FileSelection]).
+     */
+    val fileSelection: FileSelection? = null,
+) {
+    /** True for a whole-season torrent that this source plays one episode out of. */
+    val isSeasonPack: Boolean get() = fileSelection is FileSelection.Episode
+}
 
 enum class SubtitleFormat { VTT, SRT, ASS, PGS, DVD_SUB, UNKNOWN }
 

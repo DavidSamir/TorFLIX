@@ -39,8 +39,11 @@ class TorfilxDatabaseMigrationTest {
         // 1 -> 2 adds the contribution tables. Validating rather than merely running it is the
         // point: it compares the migrated schema against the exported JSON for version 2, so a
         // column type, a NOT NULL or an index name that drifts from the entity fails here instead
-        // of at startup on someone.s television.
+        // of at startup on someone's television.
         helper.runMigrationsAndValidate(TEST_DB, 2, true, MIGRATION_1_2)
+
+        // 2 -> 3 adds show_state, where a dismissed "up next" card in Continue Watching is kept.
+        helper.runMigrationsAndValidate(TEST_DB, 3, true, MIGRATION_2_3)
 
         // Opening the real database exercises the current schema against the created one.
         Room.databaseBuilder(

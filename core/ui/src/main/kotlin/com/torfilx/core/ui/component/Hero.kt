@@ -142,13 +142,23 @@ fun HeroSection(
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
+            // A show on the hero is there for one episode — the one its button plays — so say which.
+            current.episode?.let { episode ->
+                Text(
+                    text = "${episode.code} · ${episode.displayName}",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = TorfilxColors.TextPrimary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
             Text(
                 text = Format.metaLine(current.item),
                 style = MaterialTheme.typography.labelLarge,
                 color = TorfilxColors.TextSecondary,
                 maxLines = 1,
             )
-            current.item.overview?.takeIf { it.isNotBlank() }?.let { overview ->
+            (current.episode?.overview ?: current.item.overview)?.takeIf { it.isNotBlank() }?.let { overview ->
                 Text(
                     text = overview,
                     style = MaterialTheme.typography.bodyMedium,

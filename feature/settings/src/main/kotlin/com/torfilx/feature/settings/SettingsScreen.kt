@@ -106,6 +106,7 @@ fun SettingsScreen(
                 SettingsSection("Playback") {
                     SettingsToggleRow(
                         label = "Autoplay next episode",
+                        description = "Also starts finding peers for the next episode while this one ends.",
                         checked = state.settings.autoplayNextEpisode,
                         onToggle = viewModel::setAutoplayNext,
                     )

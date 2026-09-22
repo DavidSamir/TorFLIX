@@ -30,6 +30,46 @@ interface ProgressDao {
 
     @Query("DELETE FROM progress")
     suspend fun clear()
+
+    /** Several rows in one transaction: a season marked watched is all of it or none of it. */
+    @Upsert
+    suspend fun upsertAll(rows: List<ProgressEntity>)
+
+    @Query("DELETE FROM progress WHERE itemId IN (:itemIds)")
+    suspend fun deleteIn(itemIds: List<String>)
+
+    /**
+     * Deletes [itemIds] in one transaction, in chunks.
+     *
+     * Chunked because SQLite on the older Fire OS releases allows at most 999 bound parameters in one
+     * statement, and a long show has more episodes than that.
+     */
+    @Transaction
+    suspend fun deleteAll(itemIds: List<String>) {
+        itemIds.chunked(PROGRESS_DELETE_CHUNK).forEach { deleteIn(it) }
+    }
+}
+
+/** Well under the 999 bound parameters SQLite allows per statement on older Fire OS. */
+internal const val PROGRESS_DELETE_CHUNK = 500
+
+/** Per-show state; see [ShowStateEntity]. */
+@Dao
+interface ShowStateDao {
+    @Upsert
+    suspend fun upsert(state: ShowStateEntity)
+
+    @Query("SELECT * FROM show_state WHERE showId = :showId")
+    suspend fun get(showId: String): ShowStateEntity?
+
+    @Query("SELECT * FROM show_state")
+    fun observeAll(): Flow<List<ShowStateEntity>>
+
+    @Query("SELECT * FROM show_state")
+    suspend fun all(): List<ShowStateEntity>
+
+    @Query("DELETE FROM show_state")
+    suspend fun clear()
 }
 
 @Dao

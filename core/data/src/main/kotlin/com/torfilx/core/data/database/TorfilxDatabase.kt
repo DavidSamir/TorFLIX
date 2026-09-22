@@ -23,8 +23,9 @@ import androidx.room.RoomDatabase
         SearchHistoryEntity::class,
         ContributionEntity::class,
         ContributionDayEntity::class,
+        ShowStateEntity::class,
     ],
-    version = 2,
+    version = 3,
     exportSchema = true,
 )
 abstract class TorfilxDatabase : RoomDatabase() {
@@ -32,6 +33,7 @@ abstract class TorfilxDatabase : RoomDatabase() {
     abstract fun myListDao(): MyListDao
     abstract fun searchHistoryDao(): SearchHistoryDao
     abstract fun contributionDao(): ContributionDao
+    abstract fun showStateDao(): ShowStateDao
 
     companion object {
         const val NAME = "torfilx.db"

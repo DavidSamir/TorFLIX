@@ -1,6 +1,7 @@
 package com.torfilx.core.torrent
 
 import com.torfilx.core.model.CachedParts
+import com.torfilx.core.model.FileSelection
 import kotlinx.coroutines.flow.Flow
 
 /**
@@ -31,8 +32,17 @@ interface TorrentEngine {
      *
      * Downloading is sequential from the start of the chosen video file, so playback can begin long
      * before the whole file exists.
+     *
+     * @param selection which file to stream: the largest video, an episode's file preferred, or exactly
+     *   one episode's file out of a season pack (see [FileSelection]).
+     * @param displayName what the viewer calls this title, for the sharing figures; the release's file
+     *   name otherwise.
      */
-    suspend fun stream(magnet: String): TorrentStream
+    suspend fun stream(
+        magnet: String,
+        selection: FileSelection = FileSelection.LargestVideo,
+        displayName: String? = null,
+    ): TorrentStream
 
     /** Stops streaming [infoHash]; it may keep seeding if the policy allows. */
     suspend fun stopStreaming(infoHash: String)

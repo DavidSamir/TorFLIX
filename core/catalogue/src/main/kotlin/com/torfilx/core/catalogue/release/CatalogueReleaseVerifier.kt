@@ -140,6 +140,16 @@ class CatalogueReleaseVerifier(
         val problems = CatalogContentRules.problems(entries, declared, requireExplicitIds = true)
         if (problems.isNotEmpty()) reject(CatalogueRejectReason.INVALID_ENTRIES, problems.joinToString("; "))
 
+        manifest.episodeCount?.let { stated ->
+            val actual = CatalogContentRules.episodeCount(entries)
+            if (actual != stated) {
+                reject(
+                    CatalogueRejectReason.TITLE_COUNT_MISMATCH,
+                    "catalog.json holds $actual episodes; the manifest says $stated",
+                )
+            }
+        }
+
         return Result.Ok(manifest, entries)
     }
 
@@ -168,6 +178,7 @@ class CatalogueReleaseVerifier(
             if (!SHA256_HEX.matches(manifest.sha256)) add("sha256 \"${manifest.sha256.take(DETAIL)}\"")
             if (manifest.gzBytes <= 0) add("gzBytes ${manifest.gzBytes}")
             if (manifest.jsonBytes <= 0) add("jsonBytes ${manifest.jsonBytes}")
+            manifest.episodeCount?.let { if (it < 0) add("episodeCount $it") }
         }
         if (impossible.isNotEmpty()) {
             reject(CatalogueRejectReason.BAD_MANIFEST, "impossible manifest values: ${impossible.joinToString()}")

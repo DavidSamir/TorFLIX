@@ -86,7 +86,10 @@ fun LandscapeCard(
         onLongClick = onLongClick,
         widthDp = dimens.landscapeWidth,
         heightDp = dimens.landscapeHeight,
-        artworkUrl = card.item.images.thumb
+        // An episode card shows that episode's still when the catalogue has one, and the show's art
+        // otherwise.
+        artworkUrl = card.episode?.image
+            ?: card.item.images.thumb
             ?: card.item.images.backdrop
             ?: card.item.images.poster,
         modifier = modifier,
@@ -158,8 +161,13 @@ private fun FocusableMediaCard(
                 )
             }
 
-            if (card.progress?.watched == true) {
+            if (card.isWatched) {
                 WatchedBadge(modifier = Modifier.align(Alignment.TopEnd).padding(6.dp))
+            }
+
+            // A show's poster looks exactly like a film's; the label says which it is.
+            if (card.item.isShow && card.episode == null) {
+                SeriesBadge(modifier = Modifier.align(Alignment.TopStart).padding(6.dp))
             }
         }
 
@@ -239,30 +247,59 @@ private fun WatchedBadge(modifier: Modifier = Modifier) {
     }
 }
 
-/** Secondary line under a focused card: what is left to watch, or the film.s year and runtime. */
-private fun MediaCard.subtitle(): String {
+/** "SERIES", in the corner of a show's poster. Text rather than an icon, so VoiceView needs nothing extra. */
+@Composable
+fun SeriesBadge(modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(4.dp))
+            .background(TorfilxColors.ScrimStrong)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    ) {
+        Text(
+            text = "SERIES",
+            style = MaterialTheme.typography.labelMedium,
+            color = TorfilxColors.TextPrimary,
+        )
+    }
+}
+
+/**
+ * Secondary line under a focused card: what is left to watch, or the title's year and length.
+ *
+ * An episode card leads with the episode — `S1 E3 · 12m left` — because the title above it is the
+ * show's. A show's poster gives its seasons in place of a runtime.
+ */
+internal fun MediaCard.subtitle(): String {
     val parts = buildList<String> {
+        episode?.let { add(it.code) }
         progress?.takeIf { it.fraction > 0f && !it.watched }?.let { p ->
             val remaining = Format.runtime(p.remainingMs)
             if (remaining.isNotEmpty()) add("$remaining left")
         }
-        if (isEmpty()) {
-            item.year?.let { add(it.toString()) }
-            Format.runtime(item.runtimeMs).takeIf { it.isNotEmpty() }?.let { add(it) }
+        val episode = episode
+        when {
+            episode != null -> if (size == 1) add(episode.displayName)
+            isEmpty() -> {
+                item.year?.let { add(it.toString()) }
+                val length = if (item.isShow) Format.showLength(item) else Format.runtime(item.runtimeMs)
+                length.takeIf { it.isNotEmpty() }?.let { add(it) }
+            }
         }
     }
     return parts.joinToString(" · ")
 }
 
-private fun MediaCard.accessibilityDescription(): String = buildString {
+/** What VoiceView reads for a card: the title, what kind it is, which episode, and how far along. */
+internal fun MediaCard.accessibilityDescription(): String = buildString {
     append(item.title)
+    if (item.isShow) append(", series")
+    episode?.let { append(", season ${it.season} episode ${it.number}, ${it.displayName}") }
     item.year?.let { append(", $it") }
-    progress?.let { p ->
-        if (p.watched) {
-            append(", watched")
-        } else if (p.fraction > 0f) {
-            append(", ${Format.percentComplete(p.positionMs, p.durationMs)} percent watched")
-        }
+    val p = progress
+    when {
+        isWatched || p?.watched == true -> append(", watched")
+        p != null && p.fraction > 0f -> append(", ${Format.percentComplete(p.positionMs, p.durationMs)} percent watched")
     }
     if (inMyList) append(", in My List")
 }

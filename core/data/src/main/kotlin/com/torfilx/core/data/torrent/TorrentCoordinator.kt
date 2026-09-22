@@ -5,6 +5,7 @@ import com.torfilx.core.common.log.TorfilxLog
 import com.torfilx.core.data.catalog.CatalogueSessionGate
 import com.torfilx.core.data.repository.ContributionRepository
 import com.torfilx.core.data.settings.SettingsRepository
+import com.torfilx.core.model.FileSelection
 import com.torfilx.core.torrent.LibTorrentEngine
 import com.torfilx.core.torrent.SharingConsentProvider
 import com.torfilx.core.torrent.SharingStats
@@ -166,19 +167,46 @@ class TorrentCoordinator @Inject constructor(
     fun cachedParts(infoHash: String, buckets: Int = com.torfilx.core.model.CachedParts.BUCKETS) =
         engine.cachedParts(infoHash, buckets)
 
-    /** Resolves a magnet into a locally-served URL the player can open. */
-    suspend fun stream(magnet: String): TorrentStream {
+    /**
+     * Resolves a magnet into a locally-served URL the player can open.
+     *
+     * [selection] says which file of the torrent to play; see [TorrentEngine.stream].
+     */
+    suspend fun stream(
+        magnet: String,
+        selection: FileSelection = FileSelection.LargestVideo,
+        displayName: String? = null,
+    ): TorrentStream {
         settingsRepository.cachedSharingConsent = settingsRepository.sharingConsent.first()
-        return engine.stream(magnet)
+        return engine.stream(magnet, selection, displayName)
     }
 
+    /**
+     * Leaving the player: keep seeding what was downloaded, or let it go entirely.
+     *
+     * With seeding off the torrent is removed **with its data**. It used to be removed with the data
+     * left behind, which was the worst of both: the files stayed on disk, but a torrent that is no
+     * longer in the session is invisible to [TorrentEngine.enforceStorageBudget], which only evicts
+     * torrents it can see. Watching several titles in one sitting — an evening of episodes — piled
+     * up gigabytes nothing could reclaim until the next start, and on a small stick the free-space
+     * guard then paused every download, including the one being watched. No resume data is kept, so
+     * those files could never have been reused anyway.
+     */
     suspend fun stopStreaming(infoHash: String) {
-        // With seeding off, leaving the player also stops uploading that title.
         if (!settingsRepository.seedingEnabled.first()) {
-            engine.remove(infoHash, deleteData = false)
+            engine.remove(infoHash, deleteData = true)
         } else {
             engine.stopStreaming(infoHash)
         }
+    }
+
+    /**
+     * Drops a torrent that was fetched ahead of need and failed part-way (the next episode warmed during
+     * a countdown). The engine adds a torrent to its session before its metadata arrives, so a failed
+     * fetch can leave one behind that nothing manages; it goes, with whatever it wrote.
+     */
+    suspend fun discard(infoHash: String) {
+        engine.remove(infoHash, deleteData = true)
     }
 
     /**

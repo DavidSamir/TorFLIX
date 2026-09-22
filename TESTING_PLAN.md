@@ -258,3 +258,43 @@ a real Fire TV as below. See `docs/CATALOGUE_P2P.md` for the format and the tool
 - `NOT_FOUND` with nodes > 0: the publisher was not running in the last two hours, or keys differ.
 - `NO_PEERS`: the pointer resolved but nobody seeded the torrent; keep `publish` running.
 - `REJECTED (BAD_SIGNATURE)`: the release was built with a different seed than the pointer's key.
+
+## 10. TV shows (real hardware)
+
+Everything below is covered by unit tests on a desktop JVM (`ShowRulesTest`, `EndOfEpisodeTest`,
+`CatalogShowParseTest`, `ShowRepositoryTest`, `DetailsViewModelTest`, `HomeViewModelTest`,
+`LibraryViewModelTest`, `EpisodeAutoplayTest`, `PlaybackControllerShowTest`). What a JVM cannot show is
+focus on a remote, a real swarm between episodes, and the app leaving the screen, so those are checked
+by hand on a Fire OS 5 stick and on a Fire OS 7 or 8 device.
+
+### Setup
+
+1. Build a test release that contains one show of two seasons with a working magnet per episode, from
+   a test key, with `--min-version-code` set to the build under test (see `docs/CATALOGUE_P2P.md`).
+2. Install a debug build that trusts that key, as in section 9, and let the release install.
+3. `adb logcat -c`, then read along with `adb logcat -d | grep -E "Torfilx/(Playback|Catalog|Torrent)"`.
+
+### Matrix
+
+| # | Action | Expected |
+| --- | --- | --- |
+| 1 | Shows tab: scroll the grid to its last show with the D-pad | Never dead-ends; the header line counts shows ("N shows · v… · catalogue N") |
+| 2 | Open the show: header → season chips → episode list → back up; Back | Focus never gets stuck or lost; Back leaves; a 20-season show scrolls its chips |
+| 3 | First episode with sharing off | The consent dialog; accept plays, "Not now" stays on the show |
+| 4 | Play S1 E1, leave at 5 minutes | Home: Continue Watching card "S1 E1 · Xm left"; hero says "▶ Resume S1 E1"; the show's button says the same; returning from the player puts focus on that episode's row |
+| 5 | Let S1 E1 finish with autoplay on | "Next episode in 10 s"; S1 E2 starts in place; S1 E1 shows ✓ in the list afterwards; the log shows the old torrent stopped |
+| 6 | Let three episodes autoplay without touching the remote | The fourth ending asks "Are you still watching?"; Continue counts down to the next; Stop leaves |
+| 7 | Press Home during the countdown, return after a minute | The card waits with Play focused and no timer; nothing downloaded meanwhile (Settings sharing figures unchanged) |
+| 8 | Finish the last episode | "You've reached the end"; Watch again starts S1 E1 from the beginning |
+| 9 | Autoplay off in Settings, finish an episode | The next-episode card with Play and Back; nothing starts by itself |
+| 10 | "Keep seeding after playback" off, watch three episodes | Each finished torrent is removed with its files (`Torrent` log); Settings' disk usage falls back |
+| 11 | Quality preference "Direct only", then "Auto", on a 1080p stick | Play from the hero works under both; Auto never picks a 2160p source when a smaller one exists |
+| 12 | Publish the show release with `--min-version-code` above the installed build | Settings: "A newer catalogue needs a newer version of the app"; the films keep playing; installing the newer build installs the release on its next check |
+| 13 | Swap in a catalogue release while on the show's details, and while an episode plays | The details follow the new catalogue; playback carries on; the episode's end reads the new catalogue |
+| 14 | Menu on an episode with two qualities; Menu on a season chip | "Play in 720p/1080p" and Mark watched; Mark season watched/unwatched; focus returns to the row or chip afterwards |
+| 15 | (Season packs, phase 2) Two consecutive episodes from one pack | Each plays its own file; seeking works in both; the contribution page names the pack |
+| 16 | Finish S1 E2 and go Home; Menu → Remove on the show's card; then finish S1 E3 | Continue Watching shows "S1 E3 · <name>" with no bar after S1 E2; Remove hides it and it stays hidden across a restart; finishing S1 E3 brings it back as S1 E4 |
+| 17 | Upgrade from the previous release build with progress saved, then back up and restore | The app opens with progress intact (Room 2 → 3); the backup file says `"version":2`; a backup file from the previous build restores |
+| 18 | Autoplay on, a new swarm for the next episode: watch the log through the countdown, then once more pressing Back during it | "Warming … during the countdown" at the card; the next episode starts with little or no "looking for peers"; after Back the warmed torrent stops (seeds, or is removed with seeding off) |
+| 19 | Mid-episode, press the remote's next key; press Back; press next twice; say "Alexa, next" | The episode pauses behind a "Next episode" card; Back or "Keep watching" resumes it where it was; next twice plays the next episode; Alexa does the same as the key |
+| 20 | Search for three or more letters of an episode's name | The show appears after any title matches, its card reading "S1 E3 · <episode name>"; it opens the show |

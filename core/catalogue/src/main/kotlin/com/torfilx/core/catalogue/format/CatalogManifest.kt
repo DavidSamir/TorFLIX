@@ -24,6 +24,12 @@ data class CatalogManifest(
     val jsonBytes: Long,
     /** The oldest app build (versionCode) that understands this release, when the publisher sets one. */
     val minVersionCode: Int? = null,
+    /**
+     * Episodes across every show in the catalogue, when it has shows. Checked against the content
+     * like [titleCount]. Absent from a films-only release, so those stay byte-identical to before
+     * shows existed; apps from before then ignore it as an unknown field.
+     */
+    val episodeCount: Int? = null,
 )
 
 /**
@@ -68,6 +74,9 @@ object CatalogRelease {
     const val MAX_MANIFEST_BYTES: Long = 16L * 1024
     const val MAX_SIGNATURE_FILE_BYTES: Long = 1024
     const val MAX_TITLES = 50_000
+
+    /** A sanity cap on one show, not a design limit: the longest-running series are a few hundred. */
+    const val MAX_EPISODES_PER_SHOW = 2_000
 
     /** The largest torrent the app will download as a catalogue release. */
     const val MAX_TORRENT_BYTES: Long = MAX_GZ_BYTES + MAX_MANIFEST_BYTES + MAX_SIGNATURE_FILE_BYTES

@@ -29,15 +29,93 @@ object CatalogIds {
 
     fun baseId(title: String, year: String?): String = "catalog-${slug(title)}-${year.orEmpty()}"
 
+    /** A show's derived id: `show-<slug>-<year>`. The prefix keeps it clear of every film id. */
+    fun showBaseId(title: String, year: String?): String = "show-${slug(title)}-${year.orEmpty()}"
+
+    /** An episode's derived id: `<showId>-s01e03`, numbers at least two digits wide. */
+    fun episodeBaseId(showId: String, season: Int, episode: Int): String =
+        "$showId-s${season.toString().padStart(2, '0')}e${episode.toString().padStart(2, '0')}"
+
     /** Whether [id] may be used as an explicit id. Ids derived from real titles always pass. */
     fun isValid(id: String): Boolean =
         id.isNotEmpty() &&
             id.length <= MAX_ID_LENGTH &&
             id.none { it.isWhitespace() || it.isISOControl() || it in FORBIDDEN }
 
-    /** The first info hash in [entry] that the app would accept, exactly as the parser finds it. */
+    /**
+     * The first info hash in [entry] that the app would accept, exactly as the parser finds it.
+     *
+     * For a show, the first one among its episodes in file order: a show has no magnets of its own.
+     */
     fun firstInfoHash(entry: CatalogEntryDto): String? =
-        entry.magnets.firstNotNullOfOrNull { MagnetLink.infoHashOf(it.magnet) }
+        if (entry.isShow) {
+            entry.seasons.asSequence()
+                .flatMap { it.episodes.asSequence() }
+                .flatMap { it.magnets.asSequence() }
+                .firstNotNullOfOrNull { MagnetLink.infoHashOf(it.magnet) }
+        } else {
+            entry.magnets.firstNotNullOfOrNull { MagnetLink.infoHashOf(it.magnet) }
+        }
+
+    /** A usable season number: 0 (Specials) or more. */
+    fun isValidSeasonNumber(number: Int?): Boolean = number != null && number >= 0
+
+    /** A usable episode number: 1 or more. */
+    fun isValidEpisodeNumber(number: Int?): Boolean = number != null && number >= 1
+
+    /**
+     * The ids of one show: its own, and one per episode laid out exactly like the file's seasons and
+     * episodes. An entry is null where the episode cannot be placed (its season or its own number is
+     * missing or invalid), which the parser skips and the publisher refuses.
+     */
+    class ShowIds(val showId: String, val episodeIds: List<List<String?>>)
+
+    /**
+     * Assigns a show's id and then its episodes' ids, walking seasons and episodes in file order.
+     *
+     * The app's parser and the publisher's pinning both call this, and share [usedIds] with the films
+     * around it, so an episode id can never collide with a film's and both sides always agree.
+     *
+     * @param title the show's title, already trimmed.
+     * @param index the show's position in the file, counting entries that were skipped.
+     */
+    fun assignShow(entry: CatalogEntryDto, title: String, index: Int, usedIds: MutableSet<String>): ShowIds {
+        val showId = assignFrom(entry.id, showBaseId(title, entry.year), firstInfoHash(entry), index, usedIds)
+        val episodeIds = entry.seasons.map { season ->
+            season.episodes.map { episode ->
+                val seasonNumber = season.number
+                val number = episode.number
+                if (seasonNumber != null && isValidSeasonNumber(seasonNumber) &&
+                    number != null && isValidEpisodeNumber(number)
+                ) {
+                    assignEpisode(episode.id, showId, seasonNumber, number, usedIds)
+                } else {
+                    null
+                }
+            }
+        }
+        return ShowIds(showId, episodeIds)
+    }
+
+    /**
+     * An episode's id: its explicit id when usable and unused, otherwise `<showId>-sNNeNN`, and on a
+     * collision (two episodes given the same number) that id with `-2`, `-3`… in file order.
+     */
+    fun assignEpisode(
+        explicitId: String?,
+        showId: String,
+        season: Int,
+        episode: Int,
+        usedIds: MutableSet<String>,
+    ): String {
+        val explicit = explicitId?.trim()
+        if (!explicit.isNullOrEmpty() && isValid(explicit) && usedIds.add(explicit)) return explicit
+        val base = episodeBaseId(showId, season, episode)
+        if (usedIds.add(base)) return base
+        var suffix = 2
+        while (!usedIds.add("$base-$suffix")) suffix++
+        return "$base-$suffix"
+    }
 
     /**
      * The id for one entry: its explicit id when it has a usable, unused one, otherwise the derived id.
@@ -53,11 +131,7 @@ object CatalogIds {
         firstInfoHash: String?,
         index: Int,
         usedIds: MutableSet<String>,
-    ): String {
-        val explicit = explicitId?.trim()
-        if (!explicit.isNullOrEmpty() && isValid(explicit) && usedIds.add(explicit)) return explicit
-        return derive(title, year, firstInfoHash, index, usedIds)
-    }
+    ): String = assignFrom(explicitId, baseId(title, year), firstInfoHash, index, usedIds)
 
     /**
      * The historical rule: `catalog-<slug>-<year>`, disambiguated on collision by the first eight
@@ -69,8 +143,21 @@ object CatalogIds {
         firstInfoHash: String?,
         index: Int,
         usedIds: MutableSet<String>,
+    ): String = deriveFrom(baseId(title, year), firstInfoHash, index, usedIds)
+
+    private fun assignFrom(
+        explicitId: String?,
+        baseId: String,
+        firstInfoHash: String?,
+        index: Int,
+        usedIds: MutableSet<String>,
     ): String {
-        val baseId = baseId(title, year)
+        val explicit = explicitId?.trim()
+        if (!explicit.isNullOrEmpty() && isValid(explicit) && usedIds.add(explicit)) return explicit
+        return deriveFrom(baseId, firstInfoHash, index, usedIds)
+    }
+
+    private fun deriveFrom(baseId: String, firstInfoHash: String?, index: Int, usedIds: MutableSet<String>): String {
         if (usedIds.add(baseId)) return baseId
         val hashSuffix = firstInfoHash?.take(HASH_SUFFIX_LENGTH)
         val candidate = if (hashSuffix != null) "$baseId-$hashSuffix" else "$baseId-$index"
@@ -78,19 +165,33 @@ object CatalogIds {
     }
 
     /**
-     * Gives every titled entry an explicit id, keeping the ids it already has.
+     * Gives every titled entry an explicit id — and every episode of every show one too — keeping
+     * the ids already there.
      *
      * The walk mirrors the app's parser exactly (same order, same skipped entries, same index), so an
-     * entry pinned here gets the id the app was already deriving for it.
+     * entry pinned here gets the id the app was already deriving for it. An entry of a type this
+     * build does not know is skipped, as the parser skips it.
      */
     fun pin(entries: List<CatalogEntryDto>): List<CatalogEntryDto> {
         val used = HashSet<String>()
         return entries.mapIndexed { index, entry ->
             val title = entry.title.trim()
-            if (title.isEmpty()) {
-                entry
-            } else {
-                entry.copy(id = assign(entry.id, title, entry.year, firstInfoHash(entry), index, used))
+            when {
+                title.isEmpty() || !entry.hasKnownType -> entry
+                entry.isShow -> {
+                    val ids = assignShow(entry, title, index, used)
+                    entry.copy(
+                        id = ids.showId,
+                        seasons = entry.seasons.mapIndexed { s, season ->
+                            season.copy(
+                                episodes = season.episodes.mapIndexed { e, episode ->
+                                    episode.copy(id = ids.episodeIds[s][e] ?: episode.id)
+                                },
+                            )
+                        },
+                    )
+                }
+                else -> entry.copy(id = assign(entry.id, title, entry.year, firstInfoHash(entry), index, used))
             }
         }
     }

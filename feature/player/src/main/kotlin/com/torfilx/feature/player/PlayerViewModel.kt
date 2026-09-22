@@ -191,8 +191,21 @@ class PlayerViewModel @Inject constructor(
         controller.stop(release = false)
     }
 
-    /** Called when the app goes to the background: TV video apps pause rather than play blind. */
-    fun onBackground() = controller.pause()
+    /**
+     * Called when the app goes to the background: TV video apps pause rather than play blind, and a
+     * next-episode countdown stops and waits for the viewer to come back.
+     */
+    fun onBackground() = controller.onBackground()
+
+    fun onForeground() = controller.onForeground()
+
+    /** "Play now" on the next-episode countdown, or "Play" on the next-episode card. */
+    fun playNext() = controller.playNext()
+
+    /** "Watch again" at the end of a show. */
+    fun watchAgain() = controller.watchAgain()
+
+    fun dismissNextEpisodeCard() = controller.dismissNextEpisodeCard()
 
     override fun onCleared() {
         displayModeController.reset()

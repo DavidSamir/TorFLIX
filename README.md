@@ -1,6 +1,6 @@
 # TORFILX
 
-A Netflix-style Fire TV app whose library is a **signed catalogue of public-domain films**, played
+A Netflix-style Fire TV app whose library is a **signed catalogue of public-domain films and TV shows**, played
 over BitTorrent. There is no media server and no backend: the app ships a catalogue, keeps it current
 from the peer network, streams each title from its magnet link, and (with the viewer's consent) shares
 what it has downloaded.
@@ -8,7 +8,11 @@ what it has downloaded.
 ## What it does
 
 - **10-foot UI** built with Jetpack Compose + `androidx.tv:tv-material`: hero banner, focus-scaled
-  rows, details, on-screen-keyboard search, My List, Settings — all driven by the D-pad alone.
+  rows, details, on-screen-keyboard search, Movies and Shows grids, My List, Settings — all driven by
+  the D-pad alone.
+- **Shows as shows**: a show opens to its seasons and episodes; its button resumes or plays the
+  next episode; an episode ending counts down into the next one (autoplay is a setting); Continue
+  Watching holds one card per show. Specials are listed but never chained into.
 - **Torrent streaming, not downloading**: only the video file is fetched, pieces are prioritised in
   play order with deadlines, and a loopback HTTP server feeds ExoPlayer while the download continues.
   Seeking into a not-yet-downloaded part re-prioritises and buffers instead of failing.
@@ -186,6 +190,39 @@ publisher pins it once, so renaming a title never loses anyone's progress:
 ]
 ```
 
+A show is an entry with `"type": "show"` and seasons of episodes in place of magnets. Every episode
+has its own id, because that is what the viewer's progress on it is stored under:
+
+```json
+{
+  "id": "show-the-twilight-zone-1959",
+  "type": "show",
+  "title": "The Twilight Zone",
+  "year": "1959",
+  "image_url": "https://…/poster.jpg",
+  "backdrop_url": "https://…/backdrop.jpg",
+  "genres": ["Sci-Fi"],
+  "seasons": [
+    {
+      "number": 1,
+      "episodes": [
+        {
+          "id": "show-the-twilight-zone-1959-s01e01",
+          "number": 1,
+          "name": "Where Is Everybody?",
+          "runtimeMinutes": 25,
+          "magnets": [{ "quality": "720p", "magnet": "magnet:?xt=urn:btih:…" }]
+        }
+      ]
+    }
+  ]
+}
+```
+
+An episode's name is `"name"`, never `"title"`: the release format counts `"title"` keys to check
+that nothing was lost, and it counts one per top-level entry. Season `0` is Specials. The full rules
+are in [`docs/CATALOGUE_P2P.md`](docs/CATALOGUE_P2P.md).
+
 Magnets are validated when the file loads: an entry whose `xt=urn:btih:` is not a 40-character hex
 (or 32-character base32) info hash is dropped with a log line rather than failing later in the
 player. Only content that may be freely redistributed belongs here — seeding *is* redistribution.
@@ -222,7 +259,7 @@ interface: the application ships no media, hosts nothing, and operates no tracke
 Every title it shows comes from `core/data/src/main/assets/catalog.json`, which is supplied by
 whoever builds the app, or from a catalogue release signed with the publisher key that build trusts.
 
-The catalogue committed to this repository is intended to hold **public-domain films** — works whose
+The catalogue committed to this repository is intended to hold **public-domain films and episodes** — works whose
 copyright has expired and which may be freely copied and redistributed (for example Chaplin's *The
 Kid*, 1921, and *The Gold Rush*, 1925).
 

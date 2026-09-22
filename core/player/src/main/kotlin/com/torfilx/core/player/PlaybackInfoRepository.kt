@@ -21,11 +21,15 @@ class PlaybackInfoRepository @Inject constructor(
 
     private val failedSources = ConcurrentHashMap<String, MutableSet<String>>()
 
-    suspend fun playbackInfo(itemId: String): PlaybackInfo = PlaybackInfo(
-        itemId = itemId,
-        sources = catalog.sourcesFor(itemId),
-        durationMs = catalog.item(itemId)?.item?.runtimeMs,
-    )
+    /** Sources and duration for a film or an episode. A show's own id has neither: it never plays. */
+    suspend fun playbackInfo(itemId: String): PlaybackInfo {
+        val playable = catalog.playable(itemId)
+        return PlaybackInfo(
+            itemId = itemId,
+            sources = playable?.sources.orEmpty(),
+            durationMs = playable?.runtimeMs,
+        )
+    }
 
     fun failedSourceIds(itemId: String): Set<String> = failedSources[itemId]?.toSet() ?: emptySet()
 

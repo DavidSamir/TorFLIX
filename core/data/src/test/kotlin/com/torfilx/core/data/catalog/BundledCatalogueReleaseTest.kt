@@ -51,10 +51,29 @@ class BundledCatalogueReleaseTest {
         val entries = entries()
 
         assertThat(entries.filter { it.id == null }.map { it.title }).isEmpty()
+        val episodes = entries.flatMap { entry -> entry.seasons.flatMap { it.episodes } }
+        assertThat(episodes.filter { it.id == null }).isEmpty()
         // Deriving again from scratch must give exactly the pinned ids, or progress saved under the old
-        // derived ids would be orphaned by the build that introduced pinning.
-        val derived = CatalogIds.pin(entries.map { it.copy(id = null) }).map { it.id }
-        assertThat(entries.map { it.id }).isEqualTo(derived)
+        // derived ids would be orphaned by the build that introduced pinning. Episodes included: their
+        // ids are what the viewer's progress on each one is stored under.
+        val unpinned = entries.map { entry ->
+            entry.copy(
+                id = null,
+                seasons = entry.seasons.map { season -> season.copy(episodes = season.episodes.map { it.copy(id = null) }) },
+            )
+        }
+        assertThat(CatalogIds.pin(unpinned)).isEqualTo(entries)
+    }
+
+    @Test
+    fun `re-writing the bundled catalogue reproduces it byte for byte`() {
+        // The publisher decodes and re-encodes the catalogue when it builds a release. Adding fields to
+        // the format for shows must not change a byte of what the films already are.
+        val bytes = catalogFile.readBytes()
+        val rewritten = CatalogueJson.catalogWriter
+            .encodeToString(ListSerializer(CatalogEntryDto.serializer()), entries())
+            .encodeToByteArray()
+        assertThat(rewritten.decodeToString()).isEqualTo(bytes.decodeToString())
     }
 
     @Test

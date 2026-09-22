@@ -9,11 +9,12 @@ import com.torfilx.core.model.HeroItem
 import com.torfilx.core.model.HomeRow
 import com.torfilx.core.model.HomeRowKind
 import com.torfilx.core.model.MediaCard
-import com.torfilx.core.model.PlayActionResolver
+import com.torfilx.core.model.PlaybackProgress
 import com.torfilx.core.model.PlayAction
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -51,14 +52,16 @@ class HomeViewModel @Inject constructor(
         .map { online -> !online }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS), false)
 
-    val uiState: StateFlow<HomeUiState> = mediaRepository.observeHome()
-        .map { rows ->
-            if (rows.isEmpty()) {
-                HomeUiState.EmptyCatalog
-            } else {
-                HomeUiState.Content(hero = heroItems(rows), rows = rows)
-            }
+    val uiState: StateFlow<HomeUiState> = combine(
+        mediaRepository.observeHome(),
+        progressRepository.observeAllProgress(),
+    ) { rows, progress ->
+        if (rows.isEmpty()) {
+            HomeUiState.EmptyCatalog
+        } else {
+            HomeUiState.Content(hero = heroItems(rows, progress), rows = rows)
         }
+    }
         .stateIn(
             scope = viewModelScope,
             started = SharingStarted.WhileSubscribed(STOP_TIMEOUT_MS),
@@ -76,24 +79,23 @@ class HomeViewModel @Inject constructor(
 
     fun markWatched(card: MediaCard, watched: Boolean) {
         viewModelScope.launch {
-            progressRepository.markWatched(card.playableId, card.item.runtimeMs, watched)
+            progressRepository.markWatched(card.playableId, card.runtimeMs, watched)
         }
     }
 
-    /** What pressing Play on a card should do, resolved from local progress. */
-    suspend fun playActionFor(card: MediaCard): PlayAction =
-        PlayActionResolver.actionFor(card.item, progressRepository.get(card.item.id))
+    /**
+     * What pressing Play on a card does, resolved from local progress: the film or episode it names,
+     * or a show's next-up episode. Unavailable when nothing can be played, which opens the details.
+     */
+    suspend fun playActionFor(card: MediaCard): PlayAction = mediaRepository.playAction(card)
 
-    private fun heroItems(rows: List<HomeRow>): List<HeroItem> {
-        // Continue Watching first — the most likely thing the viewer wants — then the catalogue.
+    private fun heroItems(rows: List<HomeRow>, progress: Map<String, PlaybackProgress>): List<HeroItem> {
+        // Continue Watching first — the most likely thing the viewer wants — then the whole catalogue
+        // ("Recently added"), never the TV shows row alone: the hero is the front page, not a genre.
         val source = rows.firstOrNull { it.kind == HomeRowKind.CONTINUE_WATCHING }
+            ?: rows.firstOrNull { it.id == MediaRepository.ROW_CATALOG }
             ?: rows.firstOrNull()
-        return source?.items.orEmpty().take(HERO_COUNT).map { card ->
-            HeroItem(
-                card = card,
-                action = PlayActionResolver.actionFor(card.item, card.progress),
-            )
-        }
+        return source?.items.orEmpty().take(HERO_COUNT).map { card -> mediaRepository.heroItem(card, progress) }
     }
 
     private companion object {

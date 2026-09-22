@@ -175,6 +175,116 @@ class SourceSelectorTest {
         assertThat(SourceSelector.canPlay(unknown, fireStick4k)).isTrue()
     }
 
+    // --- Torrents: the only kind of source the catalogue actually has -------------------------------
+
+    private val fireStick1080 = fireStick4k.copy(maxDisplayWidth = 1920, maxDisplayHeight = 1080)
+
+    /** A catalogue magnet as the parser builds it: no codec, a height read from the quality label. */
+    private fun torrent(id: String, height: Int?) = MediaSource(
+        id = "torrent-$id",
+        kind = SourceKind.TORRENT,
+        url = "magnet:?xt=urn:btih:$id",
+        magnetUri = "magnet:?xt=urn:btih:$id",
+        height = height,
+    )
+
+    @Test
+    fun `direct only still plays torrents, which are the file itself`() {
+        val result = SourceSelector.select(
+            sources = listOf(torrent("a", 720), torrent("b", 1080)),
+            capabilities = fireStick1080,
+            preference = QualityPreference.DIRECT_ONLY,
+        )
+        assertThat(result.source?.id).isEqualTo("torrent-b")
+        assertThat(result.reason).isEqualTo(SourceSelector.Reason.DIRECT_PLAY)
+    }
+
+    @Test
+    fun `direct only still refuses the transcode when torrents are on offer too`() {
+        val result = SourceSelector.select(
+            sources = listOf(hls("t", height = 1080), torrent("a", 720)),
+            capabilities = fireStick1080,
+            preference = QualityPreference.DIRECT_ONLY,
+        )
+        assertThat(result.source?.id).isEqualTo("torrent-a")
+    }
+
+    @Test
+    fun `a torrent counts as direct play, not as a transcode`() {
+        val result = SourceSelector.select(listOf(torrent("a", 1080)), fireStick1080)
+        assertThat(result.reason).isEqualTo(SourceSelector.Reason.DIRECT_PLAY)
+    }
+
+    @Test
+    fun `auto never downloads a picture taller than the display when a smaller one exists`() {
+        val result = SourceSelector.select(
+            sources = listOf(torrent("uhd", 2160), torrent("hd", 1080), torrent("sd", 720)),
+            capabilities = fireStick1080,
+        )
+        assertThat(result.source?.id).isEqualTo("torrent-hd")
+    }
+
+    @Test
+    fun `auto takes the 2160p torrent on a 4K display`() {
+        val result = SourceSelector.select(
+            sources = listOf(torrent("hd", 1080), torrent("uhd", 2160)),
+            capabilities = fireStick4k,
+        )
+        assertThat(result.source?.id).isEqualTo("torrent-uhd")
+    }
+
+    @Test
+    fun `a torrent taller than the display still plays when it is the only one`() {
+        val result = SourceSelector.select(listOf(torrent("uhd", 2160)), fireStick1080)
+        assertThat(result.source?.id).isEqualTo("torrent-uhd")
+    }
+
+    @Test
+    fun `a torrent of unknown quality ranks below a known one within the ceiling`() {
+        val result = SourceSelector.select(
+            sources = listOf(torrent("unknown", null), torrent("sd", 720)),
+            capabilities = fireStick1080,
+        )
+        assertThat(result.source?.id).isEqualTo("torrent-sd")
+    }
+
+    @Test
+    fun `an unknown display size imposes no ceiling`() {
+        val unknownDisplay = fireStick4k.copy(maxDisplayWidth = 0, maxDisplayHeight = 0)
+        assertThat(SourceSelector.heightCeiling(QualityPreference.AUTO, unknownDisplay)).isEqualTo(Int.MAX_VALUE)
+        val result = SourceSelector.select(listOf(torrent("hd", 1080), torrent("uhd", 2160)), unknownDisplay)
+        assertThat(result.source?.id).isEqualTo("torrent-uhd")
+    }
+
+    @Test
+    fun `the ceiling is the display's short side, and cap 1080p never raises it`() {
+        val sd = fireStick4k.copy(maxDisplayWidth = 1280, maxDisplayHeight = 720)
+        assertThat(SourceSelector.heightCeiling(QualityPreference.AUTO, fireStick4k)).isEqualTo(2160)
+        assertThat(SourceSelector.heightCeiling(QualityPreference.CAP_1080P, fireStick4k)).isEqualTo(1080)
+        assertThat(SourceSelector.heightCeiling(QualityPreference.CAP_1080P, sd)).isEqualTo(720)
+        val rotated = fireStick4k.copy(maxDisplayWidth = 2160, maxDisplayHeight = 3840)
+        assertThat(SourceSelector.heightCeiling(QualityPreference.AUTO, rotated)).isEqualTo(2160)
+    }
+
+    private fun pack(id: String, height: Int) = torrent(id, height).copy(
+        id = "pack-$id",
+        fileSelection = FileSelection.Episode(EpisodeFileMatcher.Target(1, 1, 0, 10)),
+    )
+
+    @Test
+    fun `at the same quality an episode's own torrent beats its season pack`() {
+        val result = SourceSelector.select(listOf(pack("p", 1080), torrent("own", 1080)), fireStick1080)
+        assertThat(result.source?.id).isEqualTo("torrent-own")
+    }
+
+    @Test
+    fun `a season pack still wins on quality, within the display's ceiling`() {
+        assertThat(SourceSelector.select(listOf(torrent("own", 720), pack("p", 1080)), fireStick1080).source?.id)
+            .isEqualTo("pack-p")
+        assertThat(SourceSelector.select(listOf(torrent("own", 1080), pack("p", 2160)), fireStick1080).source?.id)
+            .isEqualTo("torrent-own")
+    }
+
     @Test
     fun `portrait encoded video still matches a landscape decoder limit`() {
         val portrait = direct("p", codec = "hevc", width = 2160, height = 3840)

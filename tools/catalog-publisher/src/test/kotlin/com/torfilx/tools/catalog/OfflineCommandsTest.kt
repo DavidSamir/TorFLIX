@@ -131,6 +131,61 @@ class OfflineCommandsTest {
         assertThat(catalogue.readBytes()).isEqualTo(once)
     }
 
+    /** Two films and one show of two seasons, hand-written: nothing pinned. */
+    private fun showCatalogue(): File {
+        val entries = listOf(
+            CatalogEntryDto(title = "The Kid", year = "1921", magnets = listOf(CatalogMagnetDto("720p", TestCatalogues.magnet(1)))),
+            TestCatalogues.show(title = "Twilight", seasons = 2, episodesPerSeason = 3),
+        )
+        return File(workingDir, "catalog.json").also {
+            it.writeText(CatalogueJson.catalogWriter.encodeToString(ListSerializer(CatalogEntryDto.serializer()), entries))
+        }
+    }
+
+    @Test
+    fun `pin gives every episode its id too, and says so`() {
+        val catalogue = showCatalogue()
+        assertThat(run("pin", "--catalog", catalogue.path)).isEqualTo(0)
+
+        val pinned = CatalogueJson.content.decodeFromString(ListSerializer(CatalogEntryDto.serializer()), catalogue.readText())
+        val episodeIds = pinned[1].seasons.flatMap { season -> season.episodes.map { it.id } }
+        assertThat(episodeIds).containsExactly(
+            "show-twilight-1959-s01e01", "show-twilight-1959-s01e02", "show-twilight-1959-s01e03",
+            "show-twilight-1959-s02e01", "show-twilight-1959-s02e02", "show-twilight-1959-s02e03",
+        ).inOrder()
+        assertThat(output.toString()).contains("2 titles (1 films, 1 shows with 6 episodes)")
+        assertThat(output.toString()).contains("6 episode ids pinned now")
+    }
+
+    @Test
+    fun `pin refuses a show whose episode is called title, and says why`() {
+        val broken = File(workingDir, "broken.json").apply {
+            writeText("""[{"type":"show","title":"S","seasons":[{"number":1,"episodes":[{"number":1,"title":"Pilot"}]}]}]""")
+        }
+        assertThat(run("pin", "--catalog", broken.path)).isEqualTo(1)
+        assertThat(errors.toString()).contains("a \"title\" key inside a season or episode")
+    }
+
+    @Test
+    fun `build states the episodes, the size against the limit, and can strip trackers`() {
+        requireNative()
+        val catalogue = showCatalogue()
+        val out = File(workingDir, "dist")
+
+        val exit = run(
+            "build", "--catalog", catalogue.path, "--version", "6", "--seed", seedFile().path,
+            "--out", out.path, "--min-version-code", "17", "--strip-trackers",
+        )
+
+        assertThat(exit).isEqualTo(0)
+        assertThat(output.toString()).contains("% of the ${CatalogRelease.MAX_JSON_BYTES}-byte limit")
+        assertThat(output.toString()).contains("  episodes      6")
+        assertThat(output.toString()).contains("needs app     build 17 or later")
+        val root = File(out, CatalogRelease.rootDirName(6))
+        assertThat(run("verify", "--dir", root.path, "--keys", CatalogueTestKeys.PUBLIC_KEY_HEX, "--app-version-code", "17")).isEqualTo(0)
+        assertThat(run("verify", "--dir", root.path, "--keys", CatalogueTestKeys.PUBLIC_KEY_HEX, "--app-version-code", "16")).isEqualTo(1)
+    }
+
     @Test
     fun `pin refuses a catalogue with a blank title`() {
         val broken = File(workingDir, "broken.json").apply { writeText("""[{"title":"A"},{"title":"  "}]""") }

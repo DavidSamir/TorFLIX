@@ -20,6 +20,7 @@ import com.torfilx.tv.navigation.Routes
 private val NAV_ITEMS = listOf(
     TopNavItem(Routes.HOME, "Home"),
     TopNavItem(Routes.MOVIES, "Movies"),
+    TopNavItem(Routes.SHOWS, "Shows"),
     TopNavItem(Routes.MY_LIST, "My List"),
     TopNavItem(Routes.SEARCH, "Search"),
     TopNavItem(Routes.SETTINGS, "Settings"),

@@ -75,6 +75,9 @@ internal fun contentTypeFor(fileName: String): String =
  */
 internal interface StreamSource {
     val infoHash: String
+
+    /** Index of the file within the torrent: part of its URL, so a stale request can be told apart. */
+    val fileIndex: Int
     val fileName: String
     val fileSizeBytes: Long
     val filePath: File
@@ -90,21 +93,58 @@ internal interface StreamSource {
 
     /** Marks the source as recently used, so eviction leaves it alone. */
     fun touch()
+
+    /**
+     * The file being served right now, fixed for the length of one response.
+     *
+     * A season pack serves one episode's file and then another, from the same torrent. A response
+     * that began on one file must keep reading that file's pieces even if the torrent has moved on to
+     * the next episode meanwhile; reading the new file's offsets would hand the decoder bytes from the
+     * wrong episode. A source whose file never changes is its own view.
+     */
+    fun view(): StreamSource = this
 }
 
-/** One torrent being streamed, plus the piece bookkeeping that makes seeking work. */
+/** One file of a torrent: where it is, how big, and where its bytes start within the torrent. */
+internal data class SelectedFile(
+    val index: Int,
+    val name: String,
+    val sizeBytes: Long,
+    val path: File,
+    /** Byte offset of the file within the torrent's concatenated data. */
+    val offset: Long,
+)
+
+/**
+ * One torrent being streamed, plus the piece bookkeeping that makes seeking work.
+ *
+ * The file it serves can change: a season pack plays one episode's file and then the next from the
+ * same torrent ([select]). The pieces already downloaded stay on disk and keep seeding.
+ */
 internal class StreamedTorrent(
     override val infoHash: String,
     val handle: TorrentHandle,
-    val fileIndex: Int,
-    override val fileName: String,
-    override val fileSizeBytes: Long,
-    override val filePath: File,
+    file: SelectedFile,
     val pieceLength: Int,
-    val fileOffset: Long,
     val numPieces: Int,
     var lastTouchedMs: Long,
+    /**
+     * What the viewer knows this as — "The Twilight Zone · S1 E3" — for the sharing figures and the
+     * contribution record. Null falls back to the release's file name.
+     */
+    @Volatile var displayName: String? = null,
 ) : StreamSource {
+
+    /** The file being served now. */
+    @Volatile
+    var selected: SelectedFile = file
+        private set
+
+    override val fileIndex: Int get() = selected.index
+    override val fileName: String get() = selected.name
+    override val fileSizeBytes: Long get() = selected.sizeBytes
+    override val filePath: File get() = selected.path
+    val fileOffset: Long get() = selected.offset
 
     /** Eviction orders by last use; streaming a byte counts as use. */
     override fun touch() {
@@ -122,30 +162,51 @@ internal class StreamedTorrent(
     var isStreaming: Boolean = true
 
     /**
-     * The loopback URL for this torrent.
+     * Serves [file] from now on: it alone is wanted, the old file's outstanding deadlines are dropped,
+     * and its start is fetched first. What was already downloaded of the old file stays on disk and
+     * keeps seeding; nothing is deleted.
      *
-     * The file name is appended as a second path segment purely so the URL carries the real
-     * extension (`.mkv`, `.avi`, …). ExoPlayer uses it to order its extractors, which both speeds up
-     * the first open and stops a mis-sniffed container from being handed to the wrong parser. The
-     * server keys off the *first* segment only, so the name is cosmetic and may be anything.
+     * @param fileCount files in the torrent, for the priority array libtorrent expects.
      */
-    fun toStream(port: Int) = TorrentStream(
-        infoHash = infoHash,
-        url = "http://127.0.0.1:$port/$infoHash/${fileName.toUrlPathSegment()}",
-        fileName = fileName,
-        fileSizeBytes = fileSizeBytes,
-    )
+    fun select(file: SelectedFile, fileCount: Int) {
+        if (file.index == selected.index) return
+        runCatching {
+            handle.clearPieceDeadlines()
+            val priorities = Array(fileCount) { Priority.IGNORE }
+            priorities[file.index] = Priority.DEFAULT
+            handle.prioritizeFiles(priorities)
+        }.onFailure { TorfilxLog.w(TAG, "Could not switch $infoHash to file ${file.index}", it) }
+        selected = file
+        prioritiseFrom(0L)
+    }
 
-    /** True once the file exists on disk and the piece holding [fileByteOffset] has arrived. */
-    override fun isReadableAt(fileByteOffset: Long): Boolean =
-        filePath.exists() && hasByte(fileByteOffset)
+    override fun view(): StreamSource = FileView(selected)
+
+    /**
+     * The loopback URL for this torrent's selected file.
+     *
+     * `/<infoHash>/<fileIndex>/<name>`. The server keys off the info hash and refuses a request whose
+     * file index is no longer the one selected, so a player still asking for the previous episode is
+     * told so instead of being fed the next one. The name is last purely so the URL carries the real
+     * extension (`.mkv`, `.avi`, …): ExoPlayer uses it to order its extractors, which speeds up the
+     * first open and stops a mis-sniffed container from being handed to the wrong parser.
+     */
+    fun toStream(port: Int): TorrentStream {
+        val file = selected
+        return TorrentStream(
+            infoHash = infoHash,
+            url = "http://127.0.0.1:$port/$infoHash/${file.index}/${file.name.toUrlPathSegment()}",
+            fileName = file.name,
+            fileSizeBytes = file.sizeBytes,
+        )
+    }
+
+    override fun isReadableAt(fileByteOffset: Long): Boolean = isReadableAt(selected, fileByteOffset)
 
     /** Piece index containing [fileByteOffset] of the selected file. */
-    fun pieceOf(fileByteOffset: Long): Int =
-        pieceIndexOf(fileOffset, pieceLength, numPieces, fileByteOffset)
+    fun pieceOf(fileByteOffset: Long): Int = pieceOf(selected, fileByteOffset)
 
-    fun hasByte(fileByteOffset: Long): Boolean =
-        runCatching { handle.havePiece(pieceOf(fileByteOffset)) }.getOrDefault(false)
+    fun hasByte(fileByteOffset: Long): Boolean = hasByte(selected, fileByteOffset)
 
     /**
      * Bytes from [fileByteOffset] to the end of the piece that contains it.
@@ -155,17 +216,28 @@ internal class StreamedTorrent(
      * that would read back as zeros and feed corrupt data to the decoder.
      */
     override fun bytesUntilPieceEnd(fileByteOffset: Long): Long =
-        bytesUntilPieceEnd(fileOffset, pieceLength, fileByteOffset)
+        bytesUntilPieceEnd(selected.offset, pieceLength, fileByteOffset)
+
+    override fun prioritiseFrom(fileByteOffset: Long) = prioritiseFrom(selected, fileByteOffset)
+
+    private fun pieceOf(file: SelectedFile, fileByteOffset: Long): Int =
+        pieceIndexOf(file.offset, pieceLength, numPieces, fileByteOffset)
+
+    private fun hasByte(file: SelectedFile, fileByteOffset: Long): Boolean =
+        runCatching { handle.havePiece(pieceOf(file, fileByteOffset)) }.getOrDefault(false)
+
+    private fun isReadableAt(file: SelectedFile, fileByteOffset: Long): Boolean =
+        file.path.exists() && hasByte(file, fileByteOffset)
 
     /**
-     * Prioritises the pieces just after [fileByteOffset].
+     * Prioritises the pieces just after [fileByteOffset] of [file].
      *
      * This is what turns BitTorrent (which normally fetches rarest-first, in any order) into
      * something streamable: a deadline on the next few pieces and descending priority after that.
      */
-    override fun prioritiseFrom(fileByteOffset: Long) {
+    private fun prioritiseFrom(file: SelectedFile, fileByteOffset: Long) {
         runCatching {
-            val first = pieceOf(fileByteOffset)
+            val first = pieceOf(file, fileByteOffset)
             val last = min(first + READ_AHEAD_PIECES, numPieces - 1)
             for (piece in first..last) {
                 if (handle.havePiece(piece)) continue
@@ -183,6 +255,30 @@ internal class StreamedTorrent(
                 handle.setPieceDeadline(piece, distance * DEADLINE_STEP_MS)
             }
         }.onFailure { TorfilxLog.w(TAG, "Could not prioritise pieces", it) }
+    }
+
+    /**
+     * One response's view of the torrent: always the file it started on. It never re-prioritises a
+     * file that is no longer selected — that would pull the swarm back to an episode nobody is
+     * watching — it only reads what has already arrived.
+     */
+    private inner class FileView(private val file: SelectedFile) : StreamSource {
+        override val infoHash: String get() = this@StreamedTorrent.infoHash
+        override val fileIndex: Int get() = file.index
+        override val fileName: String get() = file.name
+        override val fileSizeBytes: Long get() = file.sizeBytes
+        override val filePath: File get() = file.path
+
+        override fun isReadableAt(fileByteOffset: Long): Boolean = isReadableAt(file, fileByteOffset)
+
+        override fun bytesUntilPieceEnd(fileByteOffset: Long): Long =
+            bytesUntilPieceEnd(file.offset, pieceLength, fileByteOffset)
+
+        override fun prioritiseFrom(fileByteOffset: Long) {
+            if (selected.index == file.index) prioritiseFrom(file, fileByteOffset)
+        }
+
+        override fun touch() = this@StreamedTorrent.touch()
     }
 
     private companion object {
@@ -291,10 +387,15 @@ internal class TorrentStreamServer(
                 }
             }
 
-            // The key is the first path segment; anything after it (the file name, a query string)
-            // is decoration that must not affect the lookup.
-            val key = path.substringBefore('?').substringBefore('/')
-            val streamed = streams[key]
+            // The key is the first path segment. A numeric second segment is the file index, and a
+            // request for a file the torrent no longer serves (the previous episode of a season pack)
+            // is refused rather than answered with the new file's bytes. Anything else after the key —
+            // the file name, a query string — is decoration that must not affect the lookup.
+            val segments = path.substringBefore('?').split('/')
+            val key = segments.first()
+            val requestedFile = segments.getOrNull(1)?.takeIf { it.isNotEmpty() && it.all(Char::isDigit) }?.toIntOrNull()
+            // One view for the whole response, so it keeps reading the file it started on.
+            val streamed = streams[key]?.view()?.takeIf { requestedFile == null || requestedFile == it.fileIndex }
             val output = BufferedOutputStream(socket.getOutputStream())
             if (streamed == null) {
                 output.write("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".toByteArray())

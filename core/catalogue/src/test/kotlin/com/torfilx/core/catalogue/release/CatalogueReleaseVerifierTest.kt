@@ -266,6 +266,58 @@ class CatalogueReleaseVerifierTest {
         assertRejected(verify(root), CatalogueRejectReason.INVALID_ENTRIES)
     }
 
+    // --- Shows -----------------------------------------------------------------------------------
+
+    @Test
+    fun `a release with films and a show verifies, and states its episodes`() {
+        val entries = TestCatalogues.mixed(films = 2, shows = 1, seasons = 2, episodesPerSeason = 3)
+        val root = release(entries = entries)
+
+        val ok = assertOk(verify(root))
+        assertThat(ok.manifest.titleCount).isEqualTo(3)
+        assertThat(ok.manifest.episodeCount).isEqualTo(6)
+        assertThat(ok.entries).isEqualTo(entries)
+    }
+
+    @Test
+    fun `a films-only release states no episode count, exactly as before shows existed`() {
+        val manifest = manifestOf(release())
+        assertThat(manifest.episodeCount).isNull()
+        assertThat(File(release(version = 8), CatalogRelease.MANIFEST).readText()).doesNotContain("episodeCount")
+    }
+
+    @Test
+    fun `an episode count that disagrees with the catalogue is caught`() {
+        val root = release(entries = TestCatalogues.mixed()).also { resign(it) { m -> m.copy(episodeCount = 5) } }
+        val result = verify(root)
+        assertRejected(result, CatalogueRejectReason.TITLE_COUNT_MISMATCH)
+        assertThat((result as CatalogueReleaseVerifier.Result.Rejected).detail).contains("episodes")
+    }
+
+    @Test
+    fun `a negative episode count is an impossible manifest`() {
+        val root = release(entries = TestCatalogues.mixed()).also { resign(it) { m -> m.copy(episodeCount = -1) } }
+        assertRejected(verify(root), CatalogueRejectReason.BAD_MANIFEST)
+    }
+
+    @Test
+    fun `a signed show whose episode is called title breaks the count and is refused`() {
+        val json = """[{"id":"show-a-","type":"show","title":"A","seasons":[{"number":1,"episodes":[""" +
+            """{"id":"show-a--s01e01","number":1,"title":"Pilot"}]}]}]"""
+        assertRejected(verify(rawRelease(json, titleCount = 1)), CatalogueRejectReason.TITLE_COUNT_MISMATCH)
+    }
+
+    @Test
+    fun `a signed show whose episode has no id is refused`() {
+        val json = """[{"id":"show-a-","type":"show","title":"A","seasons":[{"number":1,"episodes":[{"number":1}]}]}]"""
+        assertRejected(verify(rawRelease(json)), CatalogueRejectReason.INVALID_ENTRIES)
+    }
+
+    @Test
+    fun `a signed entry of a type this build does not know is refused`() {
+        assertRejected(verify(rawRelease("""[{"id":"x","type":"podcast","title":"A"}]""")), CatalogueRejectReason.INVALID_ENTRIES)
+    }
+
     // --- The writer ------------------------------------------------------------------------------
 
     @Test

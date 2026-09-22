@@ -18,6 +18,7 @@ import com.torfilx.feature.details.DetailsViewModel
 import com.torfilx.feature.home.HomeScreen
 import com.torfilx.feature.library.LibraryMode
 import com.torfilx.feature.library.LibraryScreen
+import com.torfilx.feature.library.LibraryViewModel
 import com.torfilx.feature.player.PlayerScreen
 import com.torfilx.feature.player.PlayerViewModel
 import com.torfilx.feature.search.SearchScreen
@@ -27,6 +28,7 @@ import com.torfilx.feature.settings.SettingsScreen
 object Routes {
     const val HOME = "home"
     const val MOVIES = "movies"
+    const val SHOWS = "shows"
     const val MY_LIST = "my-list"
     const val SEARCH = "search"
     const val SETTINGS = "settings"
@@ -51,7 +53,7 @@ object Routes {
     }
 
     /** The tab destinations that the top bar switches between. */
-    val TOP_LEVEL = setOf(HOME, MOVIES, MY_LIST, SEARCH, SETTINGS)
+    val TOP_LEVEL = setOf(HOME, MOVIES, SHOWS, MY_LIST, SEARCH, SETTINGS)
 }
 
 private const val TRANSITION_MS = 200
@@ -90,20 +92,28 @@ fun TorfilxNavHost(
             HomeScreen(onOpenDetails = openDetails, onPlay = play)
         }
 
-        composable(Routes.MOVIES) {
-            LibraryScreen(
-                mode = LibraryMode.MOVIES,
-                onOpenDetails = openDetails,
-                onBack = { navController.navigate(Routes.HOME) { popUpTo(Routes.HOME) } },
-            )
-        }
-
-        composable(Routes.MY_LIST) {
-            LibraryScreen(
-                mode = LibraryMode.MY_LIST,
-                onOpenDetails = openDetails,
-                onBack = { navController.navigate(Routes.HOME) { popUpTo(Routes.HOME) } },
-            )
+        // The three grids share one screen. Each passes its mode as a route argument so the view model
+        // has it from its first frame: set any later, the Shows tab would draw the films for a moment.
+        listOf(
+            Routes.MOVIES to LibraryMode.MOVIES,
+            Routes.SHOWS to LibraryMode.SHOWS,
+            Routes.MY_LIST to LibraryMode.MY_LIST,
+        ).forEach { (route, mode) ->
+            composable(
+                route = route,
+                arguments = listOf(
+                    navArgument(LibraryViewModel.ARG_MODE) {
+                        type = NavType.StringType
+                        defaultValue = mode.name
+                    },
+                ),
+            ) {
+                LibraryScreen(
+                    mode = mode,
+                    onOpenDetails = openDetails,
+                    onBack = { navController.navigate(Routes.HOME) { popUpTo(Routes.HOME) } },
+                )
+            }
         }
 
         composable(Routes.SEARCH) {
@@ -126,8 +136,10 @@ fun TorfilxNavHost(
             ),
         ) {
             DetailsScreen(
-                onPlaySource = { itemId, sourceId ->
-                    navController.navigate(Routes.player(itemId, sourceId = sourceId))
+                // A film's chosen quality, a show's next-up episode, or an episode from the list.
+                // No start position: the player resumes from what is stored, as the button said.
+                onPlay = { playableId, sourceId ->
+                    navController.navigate(Routes.player(playableId, sourceId = sourceId))
                 },
                 onBack = { if (!navController.popBackStack()) onExitApp() },
             )

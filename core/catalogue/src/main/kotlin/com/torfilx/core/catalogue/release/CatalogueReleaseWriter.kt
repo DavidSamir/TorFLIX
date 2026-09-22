@@ -73,6 +73,8 @@ object CatalogueReleaseWriter {
             gzBytes = gz.size.toLong(),
             jsonBytes = catalogJson.size.toLong(),
             minVersionCode = minVersionCode,
+            // Only stated when there are shows, so a films-only release is exactly what it always was.
+            episodeCount = CatalogContentRules.episodeCount(entries).takeIf { it > 0 },
         )
         val manifestBytes = encodeManifest(manifest)
         File(root, CatalogRelease.MANIFEST).writeBytes(manifestBytes)

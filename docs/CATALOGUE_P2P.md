@@ -43,7 +43,9 @@ A release is accepted only when every link in this chain holds, checked in this 
 4. **`catalog.json.gz`** is exactly the size the manifest states and hashes to its SHA-256.
 5. **Decompression** is bounded by the signed size and must produce exactly that many bytes.
 6. **The catalogue** declares exactly `titleCount` titles, all of them decode, every title is present,
-   and every id is explicit, valid and unique.
+   and every id is explicit, valid and unique — every episode's id included. Every show has
+   numbered seasons and episodes, and, when the manifest states `episodeCount`, exactly that many
+   episodes.
 7. **The pointer and the manifest** name the same catalogue version.
 8. **Every entry maps to a title** in the app. A release the app cannot fully use is refused before
    anything is installed.
@@ -85,6 +87,7 @@ downloaded.
 | `gzBytes` | Size of `catalog.json.gz`. |
 | `jsonBytes` | Size of the decompressed `catalog.json`. |
 | `minVersionCode` | Optional. The oldest app build (versionCode) that may install this release. |
+| `episodeCount` | Optional. Episodes across every show; written only when the catalogue has shows, so a films-only release is byte-identical to one from before shows existed. Checked against the content when present. Older apps ignore it. |
 
 ### Catalogue entries
 
@@ -105,6 +108,70 @@ Unchanged from before, plus `id`:
 title is published, using exactly the id the app was already deriving from title and year. After
 that it never changes, so renaming a film or correcting its year cannot orphan anyone's progress.
 A hand-edited file without ids still loads in the app; only a published release must carry them.
+
+### Shows
+
+A show is an entry with `"type": "show"` and `seasons` in place of `magnets`:
+
+```json
+{
+  "id": "show-the-twilight-zone-1959",
+  "type": "show",
+  "title": "The Twilight Zone",
+  "year": "1959",
+  "image_url": "https://…/poster.jpg",
+  "backdrop_url": "https://…/backdrop.jpg",
+  "genres": ["Sci-Fi"],
+  "seasons": [
+    {
+      "number": 1,
+      "name": "Season 1",
+      "episodes": [
+        {
+          "id": "show-the-twilight-zone-1959-s01e01",
+          "number": 1,
+          "name": "Where Is Everybody?",
+          "overview": "…",
+          "runtimeMinutes": 25,
+          "airDate": "1959-10-02",
+          "image_url": "https://…/s01e01.jpg",
+          "magnets": [{ "quality": "720p", "magnet": "magnet:?xt=urn:btih:…" }]
+        }
+      ]
+    }
+  ]
+}
+```
+
+| Rule | Why |
+| --- | --- |
+| `type` is `movie` (or absent) or `show`; anything else is refused | An app skips a type it does not know, and a release it cannot fully use is refused |
+| An episode's name is `"name"`, **never** `"title"` | The release counts `"title"` keys and requires one per top-level entry; a `"title"` in an episode breaks that count, and the publisher says so |
+| A show has at least one season, each with at least one episode, and no magnets of its own | Its episodes are what play |
+| Season numbers are 0 or more and unique; `0` is Specials | Specials are listed last and never chained into by next-up or autoplay |
+| Episode numbers are 1 or more and unique within a season | They order the list and the autoplay |
+| Every episode has an id, unique across the whole catalogue, films included | It is the key the viewer's progress on that episode is stored under |
+| At most 2 000 episodes per show | A sanity cap, not a design limit |
+
+Ids are derived exactly like a film's, with their own prefixes: a show is `show-<slug>-<year>`, an
+episode `<show id>-s<SS>e<EE>`. `build` and `pin` walk films, shows, seasons and episodes in file order
+with one set of used ids, exactly as the app's parser does, so the ids pinned are the ids the app was
+already deriving. After pinning an id is opaque: renaming a show, correcting its year or renumbering an
+episode keeps every id, and so every viewer's progress.
+
+`seasons[].packs` holds whole-season torrents. Each pack becomes one more source for every episode of
+its season, and plays exactly that episode's file: matched by `S01E03`, `1x03` or, in a single-season
+pack, `E03` in the file names, or by position only when no file carries any episode code and their
+number equals the season's episodes. A pack that does not hold the episode plays nothing for it rather
+than some other episode. At the same quality an episode's own torrent is preferred to a pack. Builds
+before season-pack support ignore `packs`.
+
+### Size
+
+The decompressed catalogue is capped at 12 MB. Episodes add up quickly, and most of a catalogue's
+bytes are tracker URLs repeated in every magnet. `build` prints the size against the cap on every run,
+warns past two thirds of it, and `build --strip-trackers` keeps two trackers per magnet (preferring the
+ones the app adds itself). Stripping never changes an id.
 
 ### The DHT pointer
 
@@ -250,9 +317,17 @@ APK that trusts a new key has been installed.
      --version N --seed <seed file> --out dist/catalogue --asset-dir core/data/src/main/assets"
    ```
 
-   This pins ids for new titles, signs the release into `dist/catalogue/torfilx-catalogue-N/`,
-   writes its torrent beside it, verifies the result, and with `--asset-dir` rewrites the bundled
-   `catalog.json` and `catalog-manifest.json` so the next APK carries release *N*.
+   This pins ids for new titles and episodes, signs the release into
+   `dist/catalogue/torfilx-catalogue-N/`, writes its torrent beside it, verifies the result, and with
+   `--asset-dir` rewrites the bundled `catalog.json` and `catalog-manifest.json` so the next APK
+   carries release *N*.
+
+   **The first release that contains a show** must also pass `--min-version-code <V>`, where `V` is the
+   `versionCode` of the first app build that understands shows. Older builds then refuse the release
+   cleanly ("A newer catalogue needs a newer version of the app") and keep the catalogue they have,
+   instead of showing each show as a film that cannot play. They try it again after an update.
+
+   If `build` warns that the catalogue is near the size limit, add `--strip-trackers`.
 3. Commit the updated assets. `BundledCatalogueReleaseTest` fails if the manifest no longer matches
    the catalogue, or if an id has been lost.
 4. Publish it:

@@ -2,8 +2,10 @@ package com.torfilx.core.catalogue.testing
 
 import com.torfilx.core.catalogue.CatalogueJson
 import com.torfilx.core.catalogue.format.CatalogEntryDto
+import com.torfilx.core.catalogue.format.CatalogEpisodeDto
 import com.torfilx.core.catalogue.format.CatalogIds
 import com.torfilx.core.catalogue.format.CatalogMagnetDto
+import com.torfilx.core.catalogue.format.CatalogSeasonDto
 import com.torfilx.core.catalogue.release.CatalogueReleaseWriter
 import kotlinx.serialization.builtins.ListSerializer
 import java.io.File
@@ -33,6 +35,57 @@ object TestCatalogues {
             )
         },
     )
+
+    /**
+     * A show entry, unpinned: [seasons] regular seasons of [episodesPerSeason] episodes each, plus a
+     * one-episode Specials season when [withSpecials]. Every episode has its own well-formed magnet,
+     * with info hashes that never collide with [entries]' films or another show's.
+     */
+    fun show(
+        title: String = "Fixture Show",
+        year: String = "1959",
+        seasons: Int = 2,
+        episodesPerSeason: Int = 3,
+        withSpecials: Boolean = false,
+        showIndex: Int = 0,
+        genres: List<String> = listOf("Drama"),
+    ): CatalogEntryDto {
+        fun season(number: Int, count: Int) = CatalogSeasonDto(
+            number = number,
+            name = if (number == 0) "Specials" else "Season $number",
+            episodes = (1..count).map { episode ->
+                CatalogEpisodeDto(
+                    number = episode,
+                    name = "Episode $episode of season $number",
+                    runtimeMinutes = 25,
+                    magnets = listOf(
+                        CatalogMagnetDto(
+                            quality = "720p",
+                            magnet = magnet(SHOW_HASH_BASE + showIndex * SHOW_HASH_STRIDE + number * SEASON_HASH_STRIDE + episode),
+                        ),
+                    ),
+                )
+            },
+        )
+        return CatalogEntryDto(
+            type = CatalogEntryDto.TYPE_SHOW,
+            title = title,
+            year = year,
+            genres = genres,
+            seasons = (1..seasons).map { season(it, episodesPerSeason) } + if (withSpecials) listOf(season(0, 1)) else emptyList(),
+        )
+    }
+
+    /** [films] films followed by [shows] shows, all pinned: a mixed catalogue as the publisher writes it. */
+    fun mixed(films: Int = 2, shows: Int = 1, seasons: Int = 2, episodesPerSeason: Int = 3): List<CatalogEntryDto> =
+        CatalogIds.pin(
+            entries(films).map { it.copy(id = null) } +
+                (0 until shows).map { show(title = "Fixture Show ${it + 1}", seasons = seasons, episodesPerSeason = episodesPerSeason, showIndex = it) },
+        )
+
+    private const val SHOW_HASH_BASE = 100_000
+    private const val SHOW_HASH_STRIDE = 10_000
+    private const val SEASON_HASH_STRIDE = 100
 
     /** [entries] as `catalog.json` bytes, laid out the way the publisher writes them. */
     fun json(entries: List<CatalogEntryDto>): ByteArray = CatalogueJson.catalogWriter
