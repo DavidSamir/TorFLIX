@@ -1,9 +1,8 @@
 # TV shows — design and plan
 
-**Status:** built through phase 3 on top of 0.2.6 (`versionCode` 16), not yet released. Every code step
+**Status:** built through phase 3 and shipping as 0.2.7 (`versionCode` 17). Every code step
 in "Order of work" is done and unit-tested. Still open, none of them code: publishing the first
-release with a show (phase 1 step 9), the season-pack and migration checks on a device (phase 2 step
-4, phase 3 step 1), and stripping trackers once the catalogue nears the size limit (phase 3 step 6).
+release with a show (phase 1 step 9), the season-pack check on a device (phase 2 step 4), and stripping trackers once the catalogue nears the size limit (phase 3 step 6).
 Every decision that was open in the first draft is settled in "Decisions" below.
 
 ## What this is for
@@ -785,7 +784,7 @@ feature for shows whose episodes each have their own torrent.
 9. [x] `tools/catalog-publisher`: pinning and rules for shows, the size print-out, `--strip-trackers`
    (built, not applied). Build the first show release with `--min-version-code`.
    - [ ] **Operator task, not code:** build and publish the first release that contains a show, with
-     `build --min-version-code <versionCode of the first app build with shows>`. It needs the private
+     `build --min-version-code 17` (0.2.7, the first app build with shows). It needs the private
      publisher seed and curated public-domain episodes, neither of which lives in this repository.
 10. [x] Docs and the on-device checklist.
 
@@ -815,7 +814,7 @@ a stale URL is refused, and the contribution page names the pack sensibly.
    no bar. Dismissal needs state: Room 2 → 3 with `show_state(showId PK, dismissedAfterEpisodeId,
    updatedAtMs)`, a migration, the `runMigrationsAndValidate` line in
    `TorfilxDatabaseMigrationTest`, and backup format 2 (format 1 still imports).
-   **Not yet run on a device:** the instrumented `TorfilxDatabaseMigrationTest` (`:core:data:connectedDebugAndroidTest`). This machine could not hold an emulator and Gradle in memory at once. The migration SQL was checked column for column against the exported `3.json`.
+   **Verified on CI:** the instrumented `TorfilxDatabaseMigrationTest` passed on the GitHub emulator job (API 30) for commit c38b226, including the 2 → 3 step.
 2. [x] **Warm the next episode** when the countdown starts: `torrentCoordinator.stream(nextMagnet)`
    in the background (inside `MAX_ACTIVE_DOWNLOADS = 2`), `stopStreaming` if the viewer backs out;
    the Settings explanation line ships with this.

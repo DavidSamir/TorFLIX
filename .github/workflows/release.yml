@@ -95,8 +95,13 @@ jobs:
           distribution: temurin
           java-version: '17'
 
+      # Only platform-tools here: the action's default also asks for the legacy `tools` package, which
+      # Google no longer publishes, and sdkmanager then fails the whole job. The next step installs the
+      # platform and build tools the build needs.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: platform-tools
 
       # Platform 36 is on the public channel and on the runner images. The dependency set is pinned
       # to versions that compile against 36 for exactly this reason: platform 37 is only published
