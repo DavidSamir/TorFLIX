@@ -9,17 +9,26 @@ import com.torfilx.core.catalogue.release.CatalogueFetcher
 import com.torfilx.core.catalogue.release.CatalogueReleaseVerifier
 import com.torfilx.core.catalogue.swarm.CataloguePublisher
 import com.torfilx.core.catalogue.swarm.CatalogueTorrents
+import com.torfilx.core.catalogue.swarm.HolePuncher
 import com.torfilx.core.catalogue.swarm.LibtorrentNative
 import com.torfilx.core.catalogue.swarm.SwarmCatalogueTransport
 import com.torfilx.core.catalogue.swarm.SwarmLog
 import com.torfilx.core.catalogue.swarm.SessionShutdown
 import com.torfilx.core.catalogue.swarm.SwarmSessions
 import com.torfilx.core.catalogue.transport.PointerLookup
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
+import org.libtorrent4j.AddTorrentParams
+import org.libtorrent4j.SessionHandle
 import org.libtorrent4j.SessionManager
 import org.libtorrent4j.Sha1Hash
+import org.libtorrent4j.TorrentFlags
+import org.libtorrent4j.TorrentInfo
 import java.io.File
 import java.io.PrintStream
 import java.net.InetSocketAddress
@@ -59,6 +68,7 @@ class NetworkCommands(
         val infoHash = CatalogueTorrents.infoHash(torrent)
 
         val session = startSession(args)
+        val punchScope = punchScope()
         Runtime.getRuntime().addShutdownHook(Thread { stopSession(session) })
         try {
             out.println("Publishing catalogue ${manifest.catalogVersion} (${manifest.titleCount} titles)")
@@ -67,7 +77,7 @@ class NetworkCommands(
             printPorts(session)
             joinDht(session)
 
-            val transport = SwarmCatalogueTransport({ session }, MutableStateFlow(true), log = log)
+            val transport = SwarmCatalogueTransport({ session }, MutableStateFlow(true), log = log, holePunchScope = punchScope)
             transport.seed(torrent, root.absoluteFile.parentFile)
             val publisher = CataloguePublisher(session, seed, log)
             check(publisher.publicKey.contentEquals(publicKey)) {
@@ -99,6 +109,7 @@ class NetworkCommands(
             out.println("Stopped publishing after ${"%.2f".format(hours)} hours.")
             CatalogPublisherCli.EXIT_OK
         } finally {
+            punchScope.cancel()
             stopSession(session)
         }
     }
@@ -147,10 +158,11 @@ class NetworkCommands(
         val peers = args.values("peer").map(::parseEndpoint).map { InetSocketAddress(it.hostString, it.port) }
 
         val session = startSession(args)
+        val punchScope = punchScope()
         try {
             printPorts(session)
             joinDht(session)
-            val transport = SwarmCatalogueTransport({ session }, MutableStateFlow(true), log = log)
+            val transport = SwarmCatalogueTransport({ session }, MutableStateFlow(true), log = log, holePunchScope = punchScope)
             val fetcher = CatalogueFetcher(transport, CatalogueReleaseVerifier(Ed25519Verifier(keys)), keys, salt)
             var lastPercent = -1
             val outcome = fetcher.fetch(
@@ -173,6 +185,7 @@ class NetworkCommands(
             )
             report(outcome)
         } finally {
+            punchScope.cancel()
             stopSession(session)
         }
     }
@@ -211,6 +224,91 @@ class NetworkCommands(
         }
     }
 
+    // --- seed-titles -----------------------------------------------------------------------------
+
+    /**
+     * Seeds title torrents (films, episodes) so televisions can stream them, on the same kind of session
+     * as the app: announcing to the DHT every minute and hole punching toward every peer it lists, so a
+     * television reaches this machine even when neither side's router accepts incoming connections.
+     *
+     * Every `<name>.torrent` in `--dir` is seeded from the files in `--data` (default: `--dir`), which
+     * must be the exact files the torrent was made from.
+     */
+    fun seedTitles(args: Args): Int = runBlocking {
+        requireNative()
+        val torrentDir = resolve(args.required("dir"))
+        val dataDir = args.value("data")?.let(resolve) ?: torrentDir
+        val hours = args.double("hours") ?: DEFAULT_HOURS
+        val torrentFiles = torrentDir.listFiles { file -> file.isFile && file.name.endsWith(".torrent") }
+            ?.sortedBy { it.name }.orEmpty()
+        require(torrentFiles.isNotEmpty()) { "No .torrent files in ${torrentDir.path}" }
+
+        val session = startSession(args)
+        val punchScope = punchScope()
+        Runtime.getRuntime().addShutdownHook(Thread { stopSession(session) })
+        try {
+            out.println("Seeding ${torrentFiles.size} title torrent(s) from ${dataDir.path}")
+            printPorts(session)
+            joinDht(session)
+
+            val puncher = HolePuncher({ session }, punchScope, log)
+            val seeded = torrentFiles.map { file ->
+                val info = TorrentInfo(file.readBytes())
+                val hash = info.infoHash().toHex()
+                val params = AddTorrentParams.createInstance()
+                params.torrentInfo(info)
+                params.savePath(dataDir.absolutePath)
+                params.flags(params.flags().and_(TorrentFlags.PAUSED.inv()).and_(TorrentFlags.AUTO_MANAGED.inv()))
+                SessionHandle(session.swig()).asyncAddTorrent(params)
+                out.println("  $hash  ${info.name()}")
+                hash to info.name()
+            }
+
+            // Announce as soon as each file check is done rather than on the DHT's own schedule.
+            val checkDeadline = clock() + CHECK_TIMEOUT_MS
+            val pending = seeded.map { it.first }.toMutableSet()
+            while (pending.isNotEmpty() && clock() < checkDeadline) {
+                pending.removeAll { hash ->
+                    val handle = session.find(Sha1Hash(hash))?.takeIf { it.isValid } ?: return@removeAll false
+                    val status = handle.status()
+                    val done = status.isSeeding || status.isFinished
+                    if (done) {
+                        runCatching { handle.forceDHTAnnounce() }
+                        runCatching { handle.forceReannounce() }
+                        puncher.track(hash)
+                    }
+                    done
+                }
+                delay(CHECK_POLL_MS)
+            }
+            pending.forEach { hash ->
+                out.println("warning: $hash is not complete in ${dataDir.path}; is its file there, unchanged?")
+            }
+
+            val stopAt = clock() + (hours * MS_PER_HOUR).toLong()
+            while (clock() < stopAt) {
+                out.println("  dht nodes ${session.dhtNodes()}")
+                seeded.forEach { (hash, name) ->
+                    val status = runCatching { session.find(Sha1Hash(hash))?.status() }.getOrNull()
+                    out.println(
+                        "    ${name.take(NAME_PREVIEW)}: " + if (status == null) {
+                            "not in session"
+                        } else {
+                            "peers ${status.numPeers()} | uploaded ${status.totalUpload() / BYTES_PER_MB} MB | " +
+                                if (status.isSeeding) "seeding" else "checking ${(status.progress() * PERCENT).toInt()}%"
+                        },
+                    )
+                }
+                delay(STATUS_INTERVAL_MS.coerceAtMost((stopAt - clock()).coerceAtLeast(1)))
+            }
+            out.println("Stopped seeding after ${"%.2f".format(hours)} hours.")
+            CatalogPublisherCli.EXIT_OK
+        } finally {
+            punchScope.cancel()
+            stopSession(session)
+        }
+    }
+
     // --- dht-node --------------------------------------------------------------------------------
 
     fun dhtNode(args: Args): Int = runBlocking {
@@ -231,6 +329,12 @@ class NetworkCommands(
     }
 
     // --- shared ----------------------------------------------------------------------------------
+
+    /**
+     * Where [HolePuncher] runs. Not the command's runBlocking scope: runBlocking waits for its children,
+     * and the puncher's loops run until they are cancelled.
+     */
+    private fun punchScope(): CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     private fun startSession(args: Args): SessionManager = SwarmSessions.start(
         SwarmSessions.Options(
@@ -292,5 +396,9 @@ class NetworkCommands(
         const val MS_PER_MINUTE = 60_000L
         const val MS_PER_HOUR = 3_600_000.0
         const val PERCENT = 100
+        const val CHECK_TIMEOUT_MS = 300_000L
+        const val CHECK_POLL_MS = 500L
+        const val NAME_PREVIEW = 60
+        const val BYTES_PER_MB = 1_000_000L
     }
 }

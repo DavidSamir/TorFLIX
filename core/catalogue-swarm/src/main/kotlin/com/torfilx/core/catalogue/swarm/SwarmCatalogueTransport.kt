@@ -10,6 +10,7 @@ import com.torfilx.core.catalogue.transport.PointerLookup
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -46,6 +47,8 @@ import java.io.File
  * @param session the running session, or null while there is none.
  * @param dhtEnabled whether the user allows the DHT; a lookup never runs against their wishes.
  * @param extraTrackers trackers added to a download on top of whatever the swarm provides.
+ * @param holePunchScope where [HolePuncher] runs while a catalogue downloads or seeds, so that peers
+ *   behind routers that accept no incoming connections still reach each other. Null turns it off.
  */
 class SwarmCatalogueTransport(
     private val session: () -> SessionManager?,
@@ -54,7 +57,10 @@ class SwarmCatalogueTransport(
     private val extraTrackers: () -> List<String> = { emptyList() },
     private val log: SwarmLog = SwarmLog.NONE,
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    holePunchScope: CoroutineScope? = null,
 ) : CatalogueTransport {
+
+    private val holePuncher = holePunchScope?.let { HolePuncher(session, it, log) }
 
     /** One DHT lookup at a time, so a lookup's completion signal cannot be confused with another's. */
     private val lookupMutex = Mutex()
@@ -193,6 +199,7 @@ class SwarmCatalogueTransport(
 
         try {
             addMagnet(live, request)
+            holePuncher?.track(request.infoHash)
             log.info("Fetching catalogue torrent ${request.infoHash}")
             var nextDhtAnnounceAt = System.nanoTime() + DHT_REANNOUNCE_MS * NANOS_PER_MS
 
@@ -253,6 +260,9 @@ class SwarmCatalogueTransport(
         } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
             discard(live, hash)
             throw CatalogueTransportException.Engine(error.message ?: error::class.java.simpleName, error)
+        } finally {
+            // A finished download is handed to seed(), which tracks it again for as long as it seeds.
+            holePuncher?.untrack(request.infoHash)
         }
     }
 
@@ -373,11 +383,13 @@ class SwarmCatalogueTransport(
         log.debug("Seed $hex: checked, announcing")
         runCatching { handle.forceDHTAnnounce() }
         runCatching { handle.forceReannounce() }
+        holePuncher?.track(hex)
         log.info("Seeding catalogue torrent ${info.name()} ($hex) from ${saveDir.path}")
         hex
     }
 
     override suspend fun stopSeeding(infoHash: String) = withContext(ioDispatcher) {
+        holePuncher?.untrack(infoHash)
         val live = session() ?: return@withContext
         if (!CataloguePointer.isValidInfoHash(infoHash)) return@withContext
         removeAndWait(live, Sha1Hash(infoHash), deleteFiles = false)

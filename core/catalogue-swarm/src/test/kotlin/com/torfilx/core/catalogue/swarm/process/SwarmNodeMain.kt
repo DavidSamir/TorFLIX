@@ -13,6 +13,9 @@ import com.torfilx.core.catalogue.swarm.SwarmCatalogueTransport
 import com.torfilx.core.catalogue.swarm.SwarmLog
 import com.torfilx.core.catalogue.swarm.SwarmSessions
 import com.torfilx.core.catalogue.transport.CatalogueDownloadRequest
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.runBlocking
@@ -71,7 +74,13 @@ private class SwarmNode {
         error?.printStackTrace(System.err)
     }
     private var session: SessionManager? = null
-    private val transport = SwarmCatalogueTransport(session = { session }, sessionRunning = running, log = log)
+    // Hole punching on, as in the app and the tool, so these networked tests exercise it for real.
+    private val transport = SwarmCatalogueTransport(
+        session = { session },
+        sessionRunning = running,
+        log = log,
+        holePunchScope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+    )
     private var stopped = false
 
     private fun live(): SessionManager = checkNotNull(session) { "START first" }

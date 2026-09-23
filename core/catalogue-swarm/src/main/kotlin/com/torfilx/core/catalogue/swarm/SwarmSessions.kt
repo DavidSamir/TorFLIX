@@ -105,6 +105,7 @@ object SwarmSessions {
             val tweaks = SettingsPack().apply {
                 setBoolean(settings_pack.bool_types.enable_dht.swigValue(), true)
                 setInteger(settings_pack.int_types.dht_announce_interval.swigValue(), DHT_ANNOUNCE_INTERVAL_S)
+                setInteger(settings_pack.int_types.min_reconnect_time.swigValue(), HolePuncher.RECONNECT_INTERVAL_S)
                 options.listenInterfaces?.let { setString(settings_pack.string_types.listen_interfaces.swigValue(), it) }
                 options.dhtBootstrapNodes?.let { setString(settings_pack.string_types.dht_bootstrap_nodes.swigValue(), it) }
             }

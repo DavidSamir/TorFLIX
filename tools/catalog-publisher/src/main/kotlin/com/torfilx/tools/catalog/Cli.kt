@@ -46,6 +46,7 @@ class CatalogPublisherCli(
                 "verify" -> offline.verify(args)
                 "publish" -> network.publish(args)
                 "fetch" -> network.fetch(args)
+                "seed-titles" -> network.seedTitles(args)
                 "dht-node" -> network.dhtNode(args)
                 null, "help" -> {
                     out.println(USAGE)
@@ -103,10 +104,16 @@ class CatalogPublisherCli(
             |  fetch    --keys <hex,...> --out <dir> [--installed <n>] [--timeout-s <s>] [--salt <text>]
             |           [--peer <host:port>]... [--app-version-code <n>]
             |           Finds, downloads and verifies the published release exactly as the app does.
+            |  seed-titles --dir <folder of .torrent files> [--data <folder of their files>] [--hours <h>]
+            |           Seeds title torrents (episodes, films) for televisions to stream. Run it with its own
+            |           --listen port when publish runs on the same machine.
             |  dht-node [--minutes <m>]
             |           Runs a plain DHT node, to anchor a private rehearsal network.
             |
-            |Session options for publish, fetch and dht-node:
+            |Publish, fetch and seed-titles announce every minute and hole punch toward the peers the DHT
+            |lists, so two peers whose routers accept no incoming connections still reach each other.
+            |
+            |Session options for publish, fetch, seed-titles and dht-node:
             |  --listen <interfaces>      libtorrent listen_interfaces, e.g. 0.0.0.0:6881
             |  --dht-node <host:port>     a DHT node to contact directly (repeatable)
             |  --dht-router <host:port,...> bootstrap routers instead of the public ones

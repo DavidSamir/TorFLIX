@@ -3,6 +3,7 @@ package com.torfilx.core.torrent
 import android.content.Context
 import android.os.StatFs
 import com.torfilx.core.catalogue.swarm.DhtStateStore
+import com.torfilx.core.catalogue.swarm.HolePuncher
 import com.torfilx.core.catalogue.swarm.SessionShutdown
 import com.torfilx.core.catalogue.swarm.SwarmCatalogueTransport
 import com.torfilx.core.catalogue.swarm.SwarmLog
@@ -129,6 +130,23 @@ class LibTorrentEngine @Inject constructor(
             }
         },
         ioDispatcher = ioDispatcher,
+        holePunchScope = scope,
+    )
+
+    /**
+     * Keeps title torrents, streaming or seeding, reaching peers whose routers accept no incoming
+     * connections, as the catalogue transport does for catalogue torrents. See [HolePuncher].
+     */
+    private val titlePuncher = HolePuncher(
+        session = { if (started) sessionRef else null },
+        scope = scope,
+        log = SwarmLog { level, message, error ->
+            if (level == SwarmLog.Level.WARN || level == SwarmLog.Level.ERROR) {
+                TorfilxLog.w(TAG, message, error)
+            } else {
+                TorfilxLog.d(TAG, message)
+            }
+        },
     )
 
     /**
@@ -209,6 +227,9 @@ class LibTorrentEngine @Inject constructor(
                     settings_pack.int_types.dht_announce_interval.swigValue(),
                     SwarmSessions.DHT_ANNOUNCE_INTERVAL_S,
                 )
+                // Retry a peer 15 s after a failed attempt, not 60: with HolePuncher that is how two
+                // routers that accept no incoming connections are crossed.
+                setInteger(settings_pack.int_types.min_reconnect_time.swigValue(), HolePuncher.RECONNECT_INTERVAL_S)
                 setString(settings_pack.string_types.user_agent.swigValue(), USER_AGENT)
                 // Upload is only allowed once the user has consented to sharing, and even then it is
                 // capped by default: seeding must not saturate the household uplink and degrade the
@@ -272,6 +293,7 @@ class LibTorrentEngine @Inject constructor(
             saveDhtState()
             streamServer.stop()
             managedTorrents.clear()
+            titlePuncher.untrackAll()
             // libtorrent 1.2 now and then never returns from its session destructor. The wait is bounded
             // so this lock is released either way; start() refuses to run until the old session is gone.
             val manager = session
@@ -334,6 +356,7 @@ class LibTorrentEngine @Inject constructor(
         // problem, not a bad link — reporting it as an invalid magnet would mislead the user.
         runCatching { session.download(magnet, downloadDir) }
             .onFailure { throw TorrentError.EngineUnavailable(it) }
+        titlePuncher.track(infoHash)
 
         // libtorrent4j 1.2's download() strips AUTO_MANAGED from the add-torrent flags but leaves
         // libtorrent's default PAUSED flag in place — and the auto-manager is the only thing that
@@ -427,6 +450,7 @@ class LibTorrentEngine @Inject constructor(
     override suspend fun remove(infoHash: String, deleteData: Boolean) = withContext(ioDispatcher) {
         streamServer.unregister(infoHash)
         managedTorrents.remove(infoHash)
+        titlePuncher.untrack(infoHash)
         val handle = runCatching { session.find(infoHash.toSha1Hash()) }.getOrNull()
         if (handle != null && handle.isValid) {
             // Only film data is removed here. A torrent saved anywhere else is a catalogue release,
