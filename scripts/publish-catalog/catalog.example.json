@@ -1,0 +1,70 @@
+[
+  {
+    "id": "catalog-my-title-2025",
+    "title": "My Title",
+    "year": "2025",
+    "image_url": "https://archive.org/download/example/poster.jpg",
+    "backdrop_url": "https://archive.org/download/example/backdrop.jpg",
+    "overview": "A brief description of the film or show.",
+    "genres": ["Drama", "Independent"],
+    "runtimeMinutes": 120,
+    "magnets": [
+      {
+        "quality": "480p",
+        "magnet": "magnet:?xt=urn:btih:0000000000000000000000000000000000000000&dn=My.Title.2025.mp4&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce"
+      },
+      {
+        "quality": "720p",
+        "magnet": "magnet:?xt=urn:btih:1111111111111111111111111111111111111111&dn=My.Title.2025.720p.mp4&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce"
+      }
+    ]
+  },
+  {
+    "id": "show-my-series-2025",
+    "type": "show",
+    "title": "My Series",
+    "year": "2025",
+    "image_url": "https://archive.org/download/example/poster.jpg",
+    "backdrop_url": "https://archive.org/download/example/backdrop.jpg",
+    "overview": "A series with seasons and episodes.",
+    "genres": ["Comedy", "Drama"],
+    "seasons": [
+      {
+        "number": 1,
+        "name": "Season 1",
+        "episodes": [
+          {
+            "id": "show-my-series-2025-s01e01",
+            "number": 1,
+            "name": "Episode 1",
+            "overview": "The first episode.",
+            "runtimeMinutes": 45,
+            "airDate": "2025-01-01",
+            "image_url": "https://archive.org/download/example/s01e01.jpg",
+            "magnets": [
+              {
+                "quality": "720p",
+                "magnet": "magnet:?xt=urn:btih:2222222222222222222222222222222222222222&dn=My.Series.S01E01.mp4&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce"
+              }
+            ]
+          },
+          {
+            "id": "show-my-series-2025-s01e02",
+            "number": 2,
+            "name": "Episode 2",
+            "overview": "The second episode.",
+            "runtimeMinutes": 45,
+            "airDate": "2025-01-08",
+            "image_url": "https://archive.org/download/example/s01e02.jpg",
+            "magnets": [
+              {
+                "quality": "720p",
+                "magnet": "magnet:?xt=urn:btih:3333333333333333333333333333333333333333&dn=My.Series.S01E02.mp4&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]

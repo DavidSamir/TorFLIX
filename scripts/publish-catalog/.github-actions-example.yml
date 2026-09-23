@@ -1,0 +1,75 @@
+# GitHub Actions workflow example for publishing catalogues with the CI/CD script.
+#
+# To use this:
+# 1. Save your publisher seed file as a GitHub repository secret named PUBLISHER_SEED
+#    (Settings → Secrets and variables → New repository secret)
+# 2. Place this file in .github/workflows/publish-catalogue.yml
+# 3. Customize as needed (trigger, version numbering, seed path, etc.)
+#
+# The workflow will:
+# - Trigger manually (workflow_dispatch) or on tag push
+# - Write the seed from the secret to a temp file
+# - Run the publish-catalog script with the catalogue from scripts/publish-catalog/catalog.json
+# - The catalogue version can be set from the tag or run number
+
+name: Publish Catalogue
+
+on:
+  # Trigger manually from Actions tab
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Catalogue version (empty = use run number)'
+        required: false
+      hours:
+        description: 'Hours to seed (default 24)'
+        required: false
+        default: '24'
+
+  # Or trigger on tag push (e.g., catalog-v1, catalog-v2, ...)
+  # push:
+  #   tags:
+  #     - 'catalog-*'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Write seed file
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.PUBLISHER_SEED }}" > ~/.ssh/torfilx-publisher.seed
+          chmod 600 ~/.ssh/torfilx-publisher.seed
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ -z "${{ github.event.inputs.version }}" ]; then
+            VERSION="${{ github.run_number }}"
+          else
+            VERSION="${{ github.event.inputs.version }}"
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Make script executable
+        run: chmod +x scripts/publish-catalog/publish-catalog.sh
+
+      - name: Publish catalogue
+        run: |
+          scripts/publish-catalog/publish-catalog.sh \
+            ~/.ssh/torfilx-publisher.seed \
+            --version ${{ steps.version.outputs.version }} \
+            --hours ${{ github.event.inputs.hours || '24' }}
+
+      - name: Cleanup
+        if: always()
+        run: rm -f ~/.ssh/torfilx-publisher.seed

@@ -22,6 +22,11 @@ replay_pid*.log
 # Catalogue releases built by tools/catalog-publisher. Public, signed data, but binary and
 # rebuildable; the publisher seed that signs them must never be anywhere in this repository.
 dist/catalogue/
+scripts/publish-catalog/.release/
+scripts/publish-catalog/catalog.json
+
+# Temporary test files
+temp-fetch/
 
 # The publisher seed itself (see docs/CATALOGUE_P2P.md), wherever it is generated. Whoever holds it
 # can sign a catalogue every TORFILX build trusts, so it must never be tracked, even by accident.
@@ -31,3 +36,4 @@ dist/catalogue/
 # only the README is published.
 *.md
 !/README.md
+!/scripts/publish-catalog/README.md
