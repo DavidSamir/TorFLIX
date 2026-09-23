@@ -104,6 +104,7 @@ object SwarmSessions {
             session.start()
             val tweaks = SettingsPack().apply {
                 setBoolean(settings_pack.bool_types.enable_dht.swigValue(), true)
+                setInteger(settings_pack.int_types.dht_announce_interval.swigValue(), DHT_ANNOUNCE_INTERVAL_S)
                 options.listenInterfaces?.let { setString(settings_pack.string_types.listen_interfaces.swigValue(), it) }
                 options.dhtBootstrapNodes?.let { setString(settings_pack.string_types.dht_bootstrap_nodes.swigValue(), it) }
             }
@@ -148,4 +149,18 @@ object SwarmSessions {
 
     private const val DEFAULT_PORT_WAIT_MS = 5_000L
     private const val PRIVATE_NETWORK_PACKETS_PER_SECOND = 10_000
+
+    /**
+     * How often a public session announces each of its torrents to the DHT, in seconds. libtorrent's
+     * default is fifteen minutes; the app's engine uses the same value as the tool.
+     *
+     * Two peers can connect when at least one of them accepts incoming connections, and a seeder that
+     * does not (behind a NAT with no port mapping, like most office networks) only reaches a peer by
+     * connecting out to it, which it can do only after an announce has told it the peer is there. A
+     * television gives a catalogue download three minutes and a title's metadata two by default, so on
+     * the default schedule a firewalled seeder almost never announced while anyone was still waiting.
+     * Once a minute, it always does. The cost is one DHT lookup a minute per torrent, and a session holds
+     * a handful.
+     */
+    const val DHT_ANNOUNCE_INTERVAL_S = 60
 }

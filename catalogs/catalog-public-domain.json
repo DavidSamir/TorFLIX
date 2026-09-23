@@ -1,0 +1,77 @@
+[
+  {
+    "type": "show",
+    "title": "The Beverly Hillbillies",
+    "year": "1962",
+    "image_url": "https://archive.org/download/1-a-itemimage/1A_itemimage.png",
+    "backdrop_url": "https://archive.org/download/1-a-itemimage/1-a-itemimage.thumbs/The%20Beverly%20Hillbillies%20-%20s01e01%20-%20The%20Clampetts%20Strike%20Oil_000950.jpg",
+    "overview": "Mountaineer Jed Clampett strikes oil and moves his family — Granny, Elly May and Jethro — from the Ozarks to a Beverly Hills mansion, where their country ways meet high society. Season 1 is in the public domain.",
+    "genres": [
+      "Comedy"
+    ],
+    "seasons": [
+      {
+        "number": 1,
+        "name": "Season 1",
+        "episodes": [
+          {
+            "number": 1,
+            "name": "The Clampetts Strike Oil",
+            "overview": "A stray shot on Jed Clampett's Ozark land brings up oil, and the oil company's $25 million sends the family west to a Beverly Hills mansion.",
+            "runtimeMinutes": 25,
+            "airDate": "1962-09-26",
+            "image_url": "https://archive.org/download/1-a-itemimage/1-a-itemimage.thumbs/The%20Beverly%20Hillbillies%20-%20s01e01%20-%20The%20Clampetts%20Strike%20Oil_000950.jpg",
+            "magnets": [
+              {
+                "quality": "480p",
+                "magnet": "magnet:?xt=urn:btih:affe4f35fd1cccc48ec6374be943d04ddf567a9a&dn=The.Beverly.Hillbillies.S01E01.The.Clampetts.Strike.Oil.mp4&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce"
+              }
+            ]
+          },
+          {
+            "number": 2,
+            "name": "Getting Settled",
+            "overview": "The Clampetts start getting used to mansion life, puzzling over its modern conveniences, while Miss Jane tries to help them hire a household staff.",
+            "runtimeMinutes": 26,
+            "airDate": "1962-10-03",
+            "image_url": "https://archive.org/download/1-a-itemimage/1-a-itemimage.thumbs/The%20Beverly%20Hillbillies%20-%20s01e02%20-%20Getting%20Settled_000576.jpg",
+            "magnets": [
+              {
+                "quality": "480p",
+                "magnet": "magnet:?xt=urn:btih:14d88675426d0d1c1e7227ae03c47312dc87de36&dn=The.Beverly.Hillbillies.S01E02.Getting.Settled.mp4&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce"
+              }
+            ]
+          },
+          {
+            "number": 3,
+            "name": "Meanwhile, Back at the Cabin",
+            "overview": "Granny sizes up the \"cement pond\", and the rest of the family keeps making its own sense of the house and its gadgets.",
+            "runtimeMinutes": 25,
+            "airDate": "1962-10-10",
+            "image_url": "https://archive.org/download/1-a-itemimage/1-a-itemimage.thumbs/The%20Beverly%20Hillbillies%20-%20s01e03%20-%20Meanwhile%2C%20Back%20At%20The%20Cabin_000576.jpg",
+            "magnets": [
+              {
+                "quality": "480p",
+                "magnet": "magnet:?xt=urn:btih:a2d12bfcc944b1876d28cf704ff09220749c0ab6&dn=The.Beverly.Hillbillies.S01E03.Meanwhile.Back.at.the.Cabin.mp4&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce"
+              }
+            ]
+          },
+          {
+            "number": 4,
+            "name": "The Clampetts Meet Mrs. Drysdale",
+            "overview": "A chain of misunderstandings convinces Jed that his banker's wife, Margaret Drysdale, is a heavy drinker.",
+            "runtimeMinutes": 26,
+            "airDate": "1962-10-17",
+            "image_url": "https://archive.org/download/1-a-itemimage/1-a-itemimage.thumbs/The%20Beverly%20Hillbillies%20-%20s01e04%20-%20The%20Clampetts%20Meet%20Mrs.%20Drysdale_000576.jpg",
+            "magnets": [
+              {
+                "quality": "480p",
+                "magnet": "magnet:?xt=urn:btih:0af115a33b83f441ce05663416360c9acc1653f4&dn=The.Beverly.Hillbillies.S01E04.The.Clampetts.Meet.Mrs.Drysdale.mp4&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337%2Fannounce&tr=udp%3A%2F%2Fopen.tracker.cl%3A1337%2Fannounce"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+]

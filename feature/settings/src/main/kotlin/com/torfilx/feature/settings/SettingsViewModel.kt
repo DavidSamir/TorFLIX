@@ -44,7 +44,7 @@ import javax.inject.Inject
 private const val TAG = "SettingsVM"
 
 /** Which section a status line belongs under, so it appears next to the button that caused it. */
-enum class MessageSection { SHARING, CATALOGUE, WATCH_DATA, MAINTENANCE, ABOUT }
+enum class MessageSection { SHARING, CATALOGUE, LIBRARY, WATCH_DATA, ABOUT }
 
 data class SettingsMessage(val text: String, val section: MessageSection)
 
@@ -257,18 +257,18 @@ class SettingsViewModel @Inject constructor(
             runCatching { torrentCoordinator.clearAllData() }
                 .onSuccess {
                     say(
-                        MessageSection.MAINTENANCE,
+                        MessageSection.SHARING,
                         "Downloaded data cleared, and the streamed totals with it. Watch progress was kept.",
                     )
                 }
-                .onFailure { say(MessageSection.MAINTENANCE, "Could not clear downloaded data: ${it.message}") }
+                .onFailure { say(MessageSection.SHARING, "Could not clear downloaded data: ${it.message}") }
         }
     }
 
     fun clearSearchHistory() {
         viewModelScope.launch {
             mediaRepository.clearSearchHistory()
-            say(MessageSection.MAINTENANCE, "Search history cleared.")
+            say(MessageSection.LIBRARY, "Search history cleared.")
         }
     }
 
@@ -320,7 +320,7 @@ class SettingsViewModel @Inject constructor(
                     "Could not write logs: ${it.message}"
                 }
             }
-            say(MessageSection.MAINTENANCE, text)
+            say(MessageSection.ABOUT, text)
         }
     }
 

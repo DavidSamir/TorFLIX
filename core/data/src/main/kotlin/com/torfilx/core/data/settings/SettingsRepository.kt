@@ -94,6 +94,7 @@ class SettingsRepository @Inject constructor(
         val SKIP_INTRO_AUTO = booleanPreferencesKey("skip_intro_auto")
         val SHARING_CONSENT = booleanPreferencesKey("sharing_consent")
         val SHARING_CONSENT_SEEN = booleanPreferencesKey("sharing_consent_seen")
+        val SHARING_LAUNCH_ASKED = booleanPreferencesKey("sharing_launch_asked")
         val SEEDING_ENABLED = booleanPreferencesKey("seeding_enabled")
         val STORAGE_FRACTION = stringPreferencesKey("storage_fraction")
         val USE_DHT = booleanPreferencesKey("use_dht")
@@ -199,6 +200,25 @@ class SettingsRepository @Inject constructor(
 
     /** True once the first-run sharing screen has been answered either way. */
     val sharingConsentAnswered: Flow<Boolean> = safePreferences.map { it[Keys.SHARING_CONSENT_SEEN] ?: false }
+
+    /**
+     * Whether the app should open on the sharing question: sharing is off and the question has not been
+     * put at launch before.
+     *
+     * Its own flag rather than [sharingConsentAnswered], which the Play dialog also sets: a viewer who
+     * said "Not now" at Play in a build before the launch question existed is asked once more at
+     * launch, instead of being left with sharing off and no way to it but Settings.
+     */
+    val askSharingAtLaunch: Flow<Boolean> = safePreferences.map { prefs ->
+        prefs[Keys.SHARING_CONSENT] != true && prefs[Keys.SHARING_LAUNCH_ASKED] != true
+    }
+
+    /** The answer to the launch question. It is not asked at launch again, either way. */
+    suspend fun answerSharingAtLaunch(consented: Boolean) = edit {
+        it[Keys.SHARING_CONSENT] = consented
+        it[Keys.SHARING_CONSENT_SEEN] = true
+        it[Keys.SHARING_LAUNCH_ASKED] = true
+    }
 
     /** Keep seeding after playback finishes, within the storage budget. */
     val seedingEnabled: Flow<Boolean> = safePreferences.map { it[Keys.SEEDING_ENABLED] ?: true }

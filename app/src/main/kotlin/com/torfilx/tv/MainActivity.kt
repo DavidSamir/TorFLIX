@@ -5,14 +5,19 @@ import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.Modifier
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import com.torfilx.core.common.log.TorfilxLog
 import com.torfilx.core.data.settings.SettingsRepository
 import com.torfilx.core.player.PlaybackController
 import com.torfilx.core.player.display.DisplayModeController
 import com.torfilx.core.player.service.PlaybackService
+import com.torfilx.core.ui.theme.TorfilxColors
 import com.torfilx.core.ui.theme.TorfilxTheme
 import dagger.hilt.android.AndroidEntryPoint
 import javax.inject.Inject
@@ -62,10 +67,22 @@ class MainActivity : ComponentActivity() {
         // onCreate (see SettingsRepository). The first frame draws with motion on, then follows the
         // stored choice a moment later.
         val reduceMotionFlow = settingsRepository.reduceMotion.flowOn(Dispatchers.IO)
+        val askSharingFlow = settingsRepository.askSharingAtLaunch.flowOn(Dispatchers.IO)
         setContent {
             val reduceMotion by reduceMotionFlow.collectAsState(initial = false)
+            // Null until the stored answer is read, so neither the app nor the question flashes up first.
+            val askSharingState by askSharingFlow.collectAsState<Boolean, Boolean?>(initial = null)
+            val askSharing = askSharingState
             TorfilxTheme(reduceMotion = reduceMotion) {
-                TorfilxApp(onExitApp = { finish() })
+                when {
+                    askSharing == null -> Box(Modifier.fillMaxSize().background(TorfilxColors.Background))
+                    askSharing && torrentCoordinator.isAvailable() -> FirstRunSharingPrompt(
+                        onAnswer = { consented ->
+                            applicationScope.launch { settingsRepository.answerSharingAtLaunch(consented) }
+                        },
+                    )
+                    else -> TorfilxApp(onExitApp = { finish() })
+                }
             }
         }
 

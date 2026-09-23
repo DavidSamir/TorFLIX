@@ -6,6 +6,7 @@ import com.torfilx.core.catalogue.swarm.DhtStateStore
 import com.torfilx.core.catalogue.swarm.SessionShutdown
 import com.torfilx.core.catalogue.swarm.SwarmCatalogueTransport
 import com.torfilx.core.catalogue.swarm.SwarmLog
+import com.torfilx.core.catalogue.swarm.SwarmSessions
 import com.torfilx.core.catalogue.transport.CatalogueDownload
 import com.torfilx.core.catalogue.transport.CatalogueDownloadRequest
 import com.torfilx.core.catalogue.transport.CatalogueTransport
@@ -201,6 +202,13 @@ class LibTorrentEngine @Inject constructor(
                 setInteger(settings_pack.int_types.connections_limit.swigValue(), CONNECTION_LIMIT)
                 setBoolean(settings_pack.bool_types.enable_dht.swigValue(), true)
                 setBoolean(settings_pack.bool_types.enable_lsd.swigValue(), true)
+                // Announce every minute, not every fifteen: a television seeding the catalogue or a
+                // title then finds, and connects out to, one that is waiting for it, even when its own
+                // router accepts no incoming connections. See SwarmSessions.DHT_ANNOUNCE_INTERVAL_S.
+                setInteger(
+                    settings_pack.int_types.dht_announce_interval.swigValue(),
+                    SwarmSessions.DHT_ANNOUNCE_INTERVAL_S,
+                )
                 setString(settings_pack.string_types.user_agent.swigValue(), USER_AGENT)
                 // Upload is only allowed once the user has consented to sharing, and even then it is
                 // capped by default: seeding must not saturate the household uplink and degrade the

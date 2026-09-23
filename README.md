@@ -16,8 +16,9 @@ what it has downloaded.
 - **Torrent streaming, not downloading**: only the video file is fetched, pieces are prioritised in
   play order with deadlines, and a loopback HTTP server feeds ExoPlayer while the download continues.
   Seeking into a not-yet-downloaded part re-prioritises and buffers instead of failing.
-- **Explicit sharing consent**: off by default. The first attempt to play explains that streaming
-  uploads to others and exposes your IP, with a real "Not now".
+- **Explicit sharing consent**: off until the viewer agrees. The first launch asks once, with "Enable
+  sharing" focused, explaining that streaming uploads to others and exposes your IP; one OK press
+  starts playback and catalogue updates. "Not now" is real, and Play asks again.
 - **Storage budget**: never uses more than a configurable share of *free* space (default 50%, always
   keeping a 500 MB reserve), evicting oldest-touched titles first and never the one playing.
 - **Local watch state**: Continue Watching, resume positions and My List live in Room on the device.
@@ -272,7 +273,8 @@ Two things follow from how BitTorrent works, and they are worth stating plainly:
 - Your home IP address is visible to every other peer sharing the same title.
 
 Because of this, sharing is **off by default** and cannot start until it has been explicitly enabled
-through the consent screen, and it can be turned off again at any time in Settings.
+through the consent screen, shown once at first launch and again at Play if declined, and it can be
+turned off again at any time in Settings.
 
 Whoever populates `catalog.json` and builds or distributes the resulting APK is responsible for
 ensuring they have the right to copy and redistribute those files. The maintainers of this codebase
