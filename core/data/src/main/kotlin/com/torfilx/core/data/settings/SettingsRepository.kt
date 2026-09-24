@@ -328,7 +328,21 @@ class SettingsRepository @Inject constructor(
     // Writes are moved to the IO dispatcher explicitly: a setter called from a screen runs on the
     // main thread, and that is where the store would otherwise be opened for the first time.
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
-        withContext(ioDispatcher) { dataStore.edit(block) }
+        withContext(ioDispatcher) { writeOrLog { dataStore.edit(block) } }
+    }
+
+    /**
+     * A write that fails is logged and dropped: the setting keeps its old value. The callers run in the
+     * application and view-model scopes, which have no handler, so a thrown write — a full disk, which a
+     * small stick filling up with shared titles reaches, or flash remounted read-only — crashed the app,
+     * and on the sharing question at launch it crashed on every press of Accept.
+     */
+    private suspend fun writeOrLog(write: suspend () -> Unit) {
+        try {
+            write()
+        } catch (error: IOException) {
+            TorfilxLog.e(TAG, "Could not save a setting; keeping the old value", error)
+        }
     }
 
     /** The stored enum constant, or null when it is missing or names one a later build removed. */
@@ -337,8 +351,10 @@ class SettingsRepository @Inject constructor(
 
     private suspend fun editNullable(key: Preferences.Key<String>, value: String?) {
         withContext(ioDispatcher) {
-            dataStore.edit { prefs ->
-                if (value.isNullOrBlank()) prefs.remove(key) else prefs[key] = value
+            writeOrLog {
+                dataStore.edit { prefs ->
+                    if (value.isNullOrBlank()) prefs.remove(key) else prefs[key] = value
+                }
             }
         }
     }
