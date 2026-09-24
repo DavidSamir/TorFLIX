@@ -14,7 +14,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -45,8 +44,10 @@ private val LATIN_ROWS = listOf(
     "YZ'-",
 )
 
+/** At most six to a row, like the letters, so the keyboard stays inside its column. */
 private val NUMBER_ROWS = listOf(
-    "1234567890",
+    "123456",
+    "7890",
     ".,:!?&",
 )
 
@@ -55,6 +56,10 @@ private val NUMBER_ROWS = listOf(
  *
  * The Fire TV system IME is an overlay that steals focus and behaves unpredictably inside Compose,
  * so search and text entry use this instead — the same choice Netflix makes (plan.md §6.5).
+ *
+ * It must fit on the screen whole, under the search field: five letter rows and one row of actions. It
+ * used to take eight rows, so its last rows were drawn off the bottom of the screen, and Up from its top
+ * row sent focus down to a key nobody could see instead of up to the tab bar.
  */
 @Composable
 fun OnScreenKeyboard(
@@ -70,13 +75,14 @@ fun OnScreenKeyboard(
         KeyboardLayout.LATIN -> LATIN_ROWS
         KeyboardLayout.NUMBERS -> NUMBER_ROWS
     }
+    val other = KeyboardLayout.entries.first { it != layout }
 
     Column(
         modifier = modifier.focusGroup(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(KEY_GAP),
     ) {
         rows.forEachIndexed { rowIndex, rowChars ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(KEY_GAP)) {
                 rowChars.forEachIndexed { charIndex, character ->
                     KeyboardKey(
                         label = character.toString(),
@@ -91,25 +97,23 @@ fun OnScreenKeyboard(
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            KeyboardKey(label = "space", width = 108.dp, onClick = { onCharacter(' ') })
+        Row(horizontalArrangement = Arrangement.spacedBy(KEY_GAP)) {
+            KeyboardKey(label = "space", width = 96.dp, onClick = { onCharacter(' ') })
             KeyboardKey(label = "⌫", onClick = onBackspace, description = "Backspace")
-        }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            KeyboardLayout.entries.forEach { candidate ->
-                KeyboardKey(
-                    label = candidate.label,
-                    width = 68.dp,
-                    selected = candidate == layout,
-                    onClick = { onLayoutChange(candidate) },
-                )
-            }
-        }
-        Row {
-            KeyboardKey(label = "clear", width = 108.dp, onClick = onClear)
+            // One key that switches to the other layout, labelled with where it goes.
+            KeyboardKey(
+                label = other.label,
+                width = 64.dp,
+                onClick = { onLayoutChange(other) },
+                description = "Switch to ${other.label}",
+            )
+            KeyboardKey(label = "clear", width = 72.dp, onClick = onClear)
         }
     }
 }
+
+private val KEY_HEIGHT = 44.dp
+private val KEY_GAP = 6.dp
 
 @Composable
 private fun KeyboardKey(
@@ -117,7 +121,6 @@ private fun KeyboardKey(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
     width: androidx.compose.ui.unit.Dp = 48.dp,
-    selected: Boolean = false,
     description: String? = null,
     focusRequester: FocusRequester? = null,
 ) {
@@ -126,16 +129,9 @@ private fun KeyboardKey(
 
     Box(
         modifier = modifier
-            .width(width)
-            .size(width = width, height = 48.dp)
+            .size(width = width, height = KEY_HEIGHT)
             .clip(RoundedCornerShape(6.dp))
-            .background(
-                when {
-                    isFocused -> TorfilxColors.TextPrimary
-                    selected -> TorfilxColors.SurfaceHighest
-                    else -> TorfilxColors.SurfaceLow
-                },
-            )
+            .background(if (isFocused) TorfilxColors.TextPrimary else TorfilxColors.SurfaceLow)
             .border(
                 width = if (isFocused) 2.dp else 0.dp,
                 color = if (isFocused) TorfilxColors.Focus else TorfilxColors.Transparent,
