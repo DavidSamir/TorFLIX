@@ -29,6 +29,7 @@ scripts/publish-catalog/add/
 scripts/publish-catalog/remove/
 scripts/publish-catalog/output/
 scripts/publish-catalog/published/
+scripts/publish-catalog/backup/
 scripts/publish-catalog/.publish.lock/
 
 # Temporary test files

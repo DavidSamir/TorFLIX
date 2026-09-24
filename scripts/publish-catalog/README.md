@@ -80,6 +80,33 @@ A television ignores a release that is not newer than the one it has, so a relea
 used twice. Every number built is recorded in `.release/versions-used.txt`, which outlives the
 release folders; add a line (`5  2026-09-24  why`) for any number used elsewhere, such as by CI.
 
+### add/: one file per title
+
+```
+add/
+  movies/
+    2019/
+      Avengers - Endgame (2019).json
+  tv shows/
+    Breaking Bad (2008).json
+```
+
+Each file is a list holding one title, the catalogue format. The name is only for people: a title is
+known by the `id` inside, so renaming or moving a file changes nothing. In names, `:` is written ` -`
+and the other characters Windows forbids are left out.
+
+- **Add** a title: add a file for it. A new file is the newest, so the title leads the catalogue.
+- **Change** a title: edit its file. Saving makes it the newest, so it moves to the front too (the
+  app's Recently added sort goes by year first, so it only moves among titles of its year).
+- **Take out** a title: list it in `remove/`. Deleting its file takes it out too, but only with a
+  warning that it "vanished": the run stops only when more than 5% of titles vanish at once, so one
+  file deleted by accident drops that title from the next release. Read the warnings before
+  publishing.
+
+The files' modification times were set so the split kept release 4's order exactly. Copying `add/`
+with something that resets those times changes the order, never the content; with `-Order name` the
+order is then shows first, then films by year, newest year first.
+
 ### add/: newest copy wins
 
 Every file is read, newest first, and the first copy of each title found is used. A title is the
