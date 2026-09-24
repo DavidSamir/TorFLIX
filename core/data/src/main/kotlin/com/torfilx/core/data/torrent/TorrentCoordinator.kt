@@ -223,14 +223,27 @@ class TorrentCoordinator @Inject constructor(
      * The downloaded catalogue is not film data and stays; Settings has its own control for it.
      */
     suspend fun clearAllData() {
+        // Clearing stops the session to delete its files; the viewer is still in the app, so it comes
+        // straight back up rather than waiting cold for the next play.
+        warmedUp = false
         engine.purgeAllData()
         contributionRepository.clear()
+        warmIfConsented()
     }
 
     suspend fun shutdown() {
         // Flush before the session goes away, or the last half-minute of sharing is lost.
         runCatching { contributionRepository.flush(System.currentTimeMillis()) }
+        // Android usually keeps the process after the viewer exits, and the consent flow will not emit
+        // again on the next launch: without this the session stayed down until the first play, which
+        // then raced a cold DHT, and catalogue checks found no session to run on.
+        warmedUp = false
         engine.stop()
+    }
+
+    /** Brings the session up again when the app comes back on screen, if the viewer has consented. */
+    fun warmIfConsented() {
+        if (settingsRepository.cachedSharingConsent) warmUp()
     }
 
     private companion object {

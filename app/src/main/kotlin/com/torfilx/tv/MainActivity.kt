@@ -111,6 +111,9 @@ class MainActivity : ComponentActivity() {
         // keys and Alexa reach the player (plan.md §7.1).
         runCatching { startService(Intent(this, PlaybackService::class.java)) }
             .onFailure { TorfilxLog.w(TAG, "Could not start playback service", it) }
+        // Exiting stops the torrent session, and a relaunch in the same process starts no new one by
+        // itself: warm it now, so the first play does not start against a cold DHT.
+        torrentCoordinator.warmIfConsented()
     }
 
     override fun onStop() {
