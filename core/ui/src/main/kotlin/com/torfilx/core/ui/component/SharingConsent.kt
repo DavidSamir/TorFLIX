@@ -22,9 +22,9 @@ import com.torfilx.core.ui.theme.TorfilxColors
  * The sharing (seeding) consent gate.
  *
  * BitTorrent is not a download — while you watch, your device also *uploads* to other people. That
- * is a meaningful decision, so it is asked once, in plain language, with a real "no" that still
- * leaves the server playback path working. It is never pre-ticked and never implied by pressing
- * Play (plan.md — sharing section).
+ * is said in plain language before anything plays, and never implied by pressing Play. Every title
+ * plays over BitTorrent, so sharing is a condition of using the app: at launch the only other answer
+ * is to leave it ([declineLabel] "Exit").
  */
 @Composable
 fun SharingConsentDialog(
@@ -32,6 +32,9 @@ fun SharingConsentDialog(
     onAccept: () -> Unit,
     onDecline: () -> Unit,
     modifier: Modifier = Modifier,
+    title: String = "Share while you watch?",
+    acceptLabel: String = "Enable sharing",
+    declineLabel: String = "Not now",
 ) {
     Box(
         modifier = modifier
@@ -48,7 +51,7 @@ fun SharingConsentDialog(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Text(
-                text = "Share while you watch?",
+                text = title,
                 style = MaterialTheme.typography.headlineMedium,
                 color = TorfilxColors.TextPrimary,
             )
@@ -65,16 +68,14 @@ fun SharingConsentDialog(
                 color = TorfilxColors.TextSecondary,
             )
             Text(
-                // Accurate since the app became torrent-only: there is no other source to fall back
-                // on, so declining here means nothing plays until sharing is turned on again.
-                text = "You can turn sharing off at any time in Settings. Every title here is played " +
-                    "over BitTorrent, so playback stops working while sharing is off.",
+                // The app is torrent-only: there is no other source to fall back on.
+                text = "Every title here plays over BitTorrent, so sharing is needed to watch anything.",
                 style = MaterialTheme.typography.labelLarge,
                 color = TorfilxColors.TextTertiary,
             )
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                TvButton(text = "Enable sharing", onClick = onAccept, autoFocus = true)
-                TvButton(text = "Not now", onClick = onDecline, primary = false)
+                TvButton(text = acceptLabel, onClick = onAccept, autoFocus = true)
+                TvButton(text = declineLabel, onClick = onDecline, primary = false)
             }
         }
     }

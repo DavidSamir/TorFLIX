@@ -160,18 +160,14 @@ class SettingsViewModel @Inject constructor(
         viewModelScope.launch { bundledVersion.value = catalogUpdater.bundledCatalogueVersion() }
     }
 
-    /** Turning sharing off stops uploading immediately and makes torrent playback unavailable. */
-    fun setSharingConsent(consented: Boolean) {
+    /**
+     * Turns sharing on. Settings has no way to turn it off: sharing is accepted before the app opens,
+     * and is a condition of using it.
+     */
+    fun turnOnSharing() {
         viewModelScope.launch {
-            settingsRepository.setSharingConsent(consented)
-            say(
-                MessageSection.SHARING,
-                if (consented) {
-                    "Sharing is on. You upload what you are watching, within the storage limit."
-                } else {
-                    "Sharing is off. Playback is unavailable until you turn it back on."
-                },
-            )
+            settingsRepository.setSharingConsent(true)
+            say(MessageSection.SHARING, "Sharing is on. You upload what you are watching, within the storage limit.")
         }
     }
 

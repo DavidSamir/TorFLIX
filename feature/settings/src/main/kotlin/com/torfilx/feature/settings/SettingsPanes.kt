@@ -67,20 +67,19 @@ internal fun SharingPane(state: SettingsUiState, viewModel: SettingsViewModel, f
         InfoText("BitTorrent is not available on this device.", TorfilxColors.TextTertiary)
         return
     }
-    ToggleRow(
-        label = "Share while watching",
-        description = "Every title plays over BitTorrent, so this is what makes playback and catalogue " +
-            "updates work. Streaming also uploads the title to others, and your IP address is visible " +
-            "to everyone sharing it.",
-        checked = state.sharingConsent,
-        onToggle = viewModel::setSharingConsent,
-        focusRequester = first,
+    // Sharing is a condition of using the app, accepted before it opens, so there is no switch for it.
+    InfoText(
+        "Sharing is on. Every title plays over BitTorrent, so this is what makes playback and catalogue " +
+            "updates work. Streaming also uploads the title to others, and your IP address is visible to " +
+            "everyone sharing it.",
+        TorfilxColors.TextSecondary,
     )
     ToggleRow(
         label = "Keep seeding after playback",
         description = "Keeps sharing what is already on disk until the space is needed.",
         checked = state.seedingEnabled,
         onToggle = viewModel::setSeedingEnabled,
+        focusRequester = first,
     )
     ChoiceRow(
         label = "Upload speed limit",
@@ -188,7 +187,7 @@ internal fun CataloguePane(state: SettingsUiState, viewModel: SettingsViewModel,
                         "Sharing also uploads what you watch to others, who can see your IP address.",
                     onClick = {
                         runCatching { checkRow.requestFocus() }
-                        viewModel.setSharingConsent(true)
+                        viewModel.turnOnSharing()
                     },
                     focusRequester = first,
                 )

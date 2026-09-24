@@ -5,23 +5,25 @@ import androidx.compose.runtime.Composable
 import com.torfilx.core.ui.component.SharingConsentDialog
 
 /**
- * The sharing question, asked once, the first time the app opens.
+ * The sharing question, asked at launch until it is accepted.
  *
- * Every title and every catalogue update travels over BitTorrent, so until the viewer answers nothing
- * plays and the catalogue never updates. Asking here, with "Enable sharing" already focused, turns that
- * into one OK press on the first launch instead of a trip into Settings. It is still a question: "Not
- * now" or Back means no, the app opens without sharing, and Play asks again.
+ * Every title and every catalogue update travels over BitTorrent, so sharing is a condition of using
+ * the app: the answers are to accept, with "Accept and continue" already focused, or to leave. "Exit"
+ * and Back both close the app, and the question is put again next time it opens.
  *
  * Shown instead of the app rather than over it, so no screen behind it can take focus.
  */
 @Composable
-internal fun FirstRunSharingPrompt(onAnswer: (consented: Boolean) -> Unit) {
-    BackHandler { onAnswer(false) }
+internal fun FirstRunSharingPrompt(onAccept: () -> Unit, onExit: () -> Unit) {
+    BackHandler(onBack = onExit)
     SharingConsentDialog(
+        title = "TORFILX shares while you watch",
         storageSummary = "Sharing is also how the catalogue stays current: new titles and episodes arrive " +
             "from the peer network, signed by the catalogue's publisher, with no server involved. Shared " +
             "titles never use more than half of the free space, and the oldest are cleared first.",
-        onAccept = { onAnswer(true) },
-        onDecline = { onAnswer(false) },
+        acceptLabel = "Accept and continue",
+        declineLabel = "Exit",
+        onAccept = onAccept,
+        onDecline = onExit,
     )
 }

@@ -71,15 +71,15 @@ class MainActivity : ComponentActivity() {
         setContent {
             val reduceMotion by reduceMotionFlow.collectAsState(initial = false)
             // Null until the stored answer is read, so neither the app nor the question flashes up first.
+            // True until sharing is accepted: the app itself is only shown to a viewer who has.
             val askSharingState by askSharingFlow.collectAsState<Boolean, Boolean?>(initial = null)
             val askSharing = askSharingState
             TorfilxTheme(reduceMotion = reduceMotion) {
                 when {
                     askSharing == null -> Box(Modifier.fillMaxSize().background(TorfilxColors.Background))
                     askSharing && torrentCoordinator.isAvailable() -> FirstRunSharingPrompt(
-                        onAnswer = { consented ->
-                            applicationScope.launch { settingsRepository.answerSharingAtLaunch(consented) }
-                        },
+                        onAccept = { applicationScope.launch { settingsRepository.acceptSharingAtLaunch() } },
+                        onExit = { finish() },
                     )
                     else -> TorfilxApp(onExitApp = { finish() })
                 }

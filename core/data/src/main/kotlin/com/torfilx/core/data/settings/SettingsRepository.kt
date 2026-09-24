@@ -202,20 +202,18 @@ class SettingsRepository @Inject constructor(
     val sharingConsentAnswered: Flow<Boolean> = safePreferences.map { it[Keys.SHARING_CONSENT_SEEN] ?: false }
 
     /**
-     * Whether the app should open on the sharing question: sharing is off and the question has not been
-     * put at launch before.
+     * Whether the app must open on the sharing question: until sharing is accepted, nothing else of the
+     * app is shown.
      *
-     * Its own flag rather than [sharingConsentAnswered], which the Play dialog also sets: a viewer who
-     * said "Not now" at Play in a build before the launch question existed is asked once more at
-     * launch, instead of being left with sharing off and no way to it but Settings.
+     * Sharing is a condition of using the app, since every title plays over BitTorrent. So this follows
+     * the consent alone, not whether the question was put before: a viewer who said "Not now" in an
+     * earlier build is asked again, and can accept or leave.
      */
-    val askSharingAtLaunch: Flow<Boolean> = safePreferences.map { prefs ->
-        prefs[Keys.SHARING_CONSENT] != true && prefs[Keys.SHARING_LAUNCH_ASKED] != true
-    }
+    val askSharingAtLaunch: Flow<Boolean> = safePreferences.map { prefs -> prefs[Keys.SHARING_CONSENT] != true }
 
-    /** The answer to the launch question. It is not asked at launch again, either way. */
-    suspend fun answerSharingAtLaunch(consented: Boolean) = edit {
-        it[Keys.SHARING_CONSENT] = consented
+    /** Records that sharing was accepted at launch. */
+    suspend fun acceptSharingAtLaunch() = edit {
+        it[Keys.SHARING_CONSENT] = true
         it[Keys.SHARING_CONSENT_SEEN] = true
         it[Keys.SHARING_LAUNCH_ASKED] = true
     }
