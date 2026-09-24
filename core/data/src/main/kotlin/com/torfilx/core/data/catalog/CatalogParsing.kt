@@ -187,7 +187,7 @@ private fun mapCatalogEntry(
             sortTitle = title.removePrefix("The ").trim(),
             year = entry.year?.filter { it.isDigit() }?.toIntOrNull(),
             runtimeMs = entry.runtimeMinutes?.let { it * 60_000L },
-            overview = entry.overview,
+            overview = entry.overview.asPlainText(),
             // A repeated genre would put the same film twice in one row, and a duplicate key inside a
             // lazy list is a hard crash, so genres are normalised here, once.
             genres = entry.genres
@@ -264,7 +264,7 @@ private fun mapShow(entry: CatalogEntryDto, title: String, index: Int, usedIds: 
                 season = seasonNumber,
                 number = number,
                 name = episodeDto.name?.trim()?.takeIf { it.isNotEmpty() },
-                overview = episodeDto.overview?.takeIf { it.isNotBlank() },
+                overview = episodeDto.overview.asPlainText(),
                 runtimeMs = episodeDto.runtimeMinutes?.takeIf { it > 0 }?.let { it * 60_000L },
                 airDateMs = parseAirDate(episodeDto.airDate),
                 image = episodeDto.imageUrl?.takeIf { it.isNotBlank() },
@@ -288,7 +288,7 @@ private fun mapShow(entry: CatalogEntryDto, title: String, index: Int, usedIds: 
             sortTitle = title.removePrefix("The ").trim(),
             year = entry.year?.filter { it.isDigit() }?.toIntOrNull(),
             runtimeMs = null,
-            overview = entry.overview,
+            overview = entry.overview.asPlainText(),
             genres = entry.genres
                 .mapNotNull { it.trim().takeIf(String::isNotEmpty) }
                 .distinctBy { it.lowercase() },
@@ -381,6 +381,34 @@ private fun epochDay(year: Int, month: Int, day: Int): Long {
     val dayOfEra = yearOfEra * 365 + yearOfEra / 4 - yearOfEra / 100 + dayOfYear
     return era * 146_097L + dayOfEra - 719_468L
 }
+
+/**
+ * Catalogue text as plain prose, or null when nothing readable is left.
+ *
+ * Summaries copied from TVmaze arrive as HTML — "<p><b>Ted Lasso</b> centers on…" — and a TV has no
+ * business showing the tags. Paragraph and line breaks become spaces, other tags go, the entities such
+ * text uses are decoded, and runs of whitespace close up. Text with neither a tag nor an entity is
+ * only trimmed.
+ */
+internal fun String?.asPlainText(): String? {
+    if (this == null) return null
+    if ('<' !in this && '&' !in this) return trim().takeIf { it.isNotEmpty() }
+    val text = HTML_BREAK.replace(this, " ")
+        .let { HTML_TAG.replace(it, "") }
+        .replace("&nbsp;", " ")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+    return WHITESPACE.replace(text, " ").trim().takeIf { it.isNotEmpty() }
+}
+
+private val HTML_BREAK = Regex("<\\s*(br|/?p)\\b[^>]*>", RegexOption.IGNORE_CASE)
+// A tag opens with a letter, "/" or "!": a "<" followed by a space is prose, as in "A < B".
+private val HTML_TAG = Regex("<[/!]?[a-zA-Z][^>]*>")
+private val WHITESPACE = Regex("\\s+")
 
 private fun String.qualityHeight(): Int? = when {
     contains("2160") || contains("4k", ignoreCase = true) -> 2160
