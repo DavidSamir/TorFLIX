@@ -8,3 +8,4 @@
 #
 #   keytool -list -v -keystore torfilx-release.jks -alias torfilx | grep SHA256:
 #
+D0:8A:0B:35:3A:B1:EA:66:67:65:FF:81:94:D8:6D:D2:8E:FC:A8:A8:A4:39:93:15:00:4B:1E:45:3A:FC:0E:22
