@@ -24,6 +24,7 @@ import com.torfilx.core.model.UploadLimit
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -147,6 +148,7 @@ class LibTorrentEngine @Inject constructor(
                 TorfilxLog.d(TAG, message)
             }
         },
+        blockingDispatcher = ioDispatcher,
     )
 
     /**
@@ -357,7 +359,24 @@ class LibTorrentEngine @Inject constructor(
         runCatching { session.download(magnet, downloadDir) }
             .onFailure { throw TorrentError.EngineUnavailable(it) }
         titlePuncher.track(infoHash)
+        beginPending(infoHash)
+        try {
+            awaitStream(infoHash, magnet, selection, displayName)
+        } catch (error: Throwable) {
+            withContext(NonCancellable) { abandon(infoHash, error) }
+            throw error
+        } finally {
+            endPending(infoHash)
+        }
+    }
 
+    /** The rest of [stream] for a torrent just added: its metadata, its file, and the stream itself. */
+    private suspend fun awaitStream(
+        infoHash: String,
+        magnet: String,
+        selection: FileSelection,
+        displayName: String?,
+    ): TorrentStream {
         // libtorrent4j 1.2's download() strips AUTO_MANAGED from the add-torrent flags but leaves
         // libtorrent's default PAUSED flag in place — and the auto-manager is the only thing that
         // would ever un-pause it. Left alone, the torrent never announces, so no peer ever sends
@@ -428,8 +447,48 @@ class LibTorrentEngine @Inject constructor(
         // Prime the beginning of the file so playback can start without waiting for the whole thing.
         streamed.prioritiseFrom(0L)
 
-        streamed.toStream(streamServer.port)
+        return streamed.toStream(streamServer.port)
     }
+
+    /**
+     * A [stream] that ended — failed, or cancelled because the viewer left — after its torrent joined the
+     * session but before it was managed.
+     *
+     * Left as it was, that torrent stayed in the session, resumed and hole-punched, with nothing looking
+     * after it: when its metadata turned up later, libtorrent downloaded every file at default priority
+     * (a whole season pack), outside the storage budget and the free-space guard, which instead evicted
+     * the viewer's own seeds to make room — pressing Back while a title was "looking for peers" was
+     * enough. Now a metadata timeout is paused, so a retry picks up the peers and metadata it has found
+     * so far (the player retries a timeout by itself), and anything else is removed with its data.
+     *
+     * Left alone when another [stream] of the same torrent is still waiting, or one already manages it.
+     */
+    private suspend fun abandon(infoHash: String, cause: Throwable) {
+        if (managedTorrents.containsKey(infoHash) || pendingCount(infoHash) > 1) return
+        titlePuncher.untrack(infoHash)
+        if (cause is TorrentError.MetadataTimeout) {
+            val handle = runCatching { session.find(infoHash.toSha1Hash()) }.getOrNull()
+            if (handle != null && handle.isValid) runCatching { handle.pause() }
+            TorfilxLog.i(TAG, "No metadata for $infoHash yet; paused until it is asked for again")
+        } else {
+            TorfilxLog.i(TAG, "Dropping $infoHash: it ended before it was streaming (${cause::class.simpleName})")
+            remove(infoHash, deleteData = true)
+        }
+    }
+
+    /** [stream] calls waiting on each torrent's metadata, so [abandon] never drops one another still wants. */
+    private val pendingStreams = HashMap<String, Int>()
+
+    private fun beginPending(infoHash: String) = synchronized(pendingStreams) {
+        pendingStreams[infoHash] = (pendingStreams[infoHash] ?: 0) + 1
+    }
+
+    private fun endPending(infoHash: String) = synchronized(pendingStreams) {
+        val left = (pendingStreams[infoHash] ?: 1) - 1
+        if (left > 0) pendingStreams[infoHash] = left else pendingStreams.remove(infoHash)
+    }
+
+    private fun pendingCount(infoHash: String): Int = synchronized(pendingStreams) { pendingStreams[infoHash] ?: 0 }
 
     override suspend fun stopStreaming(infoHash: String) = withContext(ioDispatcher) {
         val streamed = managedTorrents[infoHash] ?: return@withContext
