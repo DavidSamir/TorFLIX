@@ -30,7 +30,8 @@ class CatalogStreamChunkingTest {
         isLenient = true
     }
 
-    private val catalogFile = File("src/main/assets/catalog.json")
+    /** Full size, so a short read has two thousand titles' worth of chances to truncate it. */
+    private val catalogFile = FullSizeCatalogue.FILE
 
     /** An InputStream that never returns more than [chunk] bytes from a single read. */
     private class ChokedStream(private val data: ByteArray, private val chunk: Int) : InputStream() {

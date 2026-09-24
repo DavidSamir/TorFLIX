@@ -2,6 +2,7 @@ package com.torfilx.core.data.catalog
 
 import com.google.common.truth.Truth.assertThat
 import com.torfilx.core.catalogue.format.CatalogRelease
+import com.torfilx.core.catalogue.format.countDeclaredTitles
 import com.torfilx.core.catalogue.release.CatalogueReleaseVerifier
 import com.torfilx.core.catalogue.testing.CatalogueTestKeys
 import com.torfilx.core.catalogue.testing.TestCatalogues
@@ -198,7 +199,7 @@ class LayeredCatalogTest {
         val snapshot = layeredCatalog(FakeCatalogAssetSource(json, manifest), store).snapshot()
 
         assertThat(snapshot.isIncomplete).isFalse()
-        assertThat(snapshot.items.size).isAtLeast(2_000)
+        assertThat(snapshot.items.size).isEqualTo(countDeclaredTitles(json))
         assertThat(snapshot.info.origin).isEqualTo(CatalogueOrigin.BUNDLED)
     }
 }
