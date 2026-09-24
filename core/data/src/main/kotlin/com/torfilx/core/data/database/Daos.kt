@@ -53,6 +53,9 @@ interface ProgressDao {
 /** Well under the 999 bound parameters SQLite allows per statement on older Fire OS. */
 internal const val PROGRESS_DELETE_CHUNK = 500
 
+/** What an `@Insert(onConflict = IGNORE)` returns when the row was already there. */
+internal const val NOT_INSERTED = -1L
+
 /** Per-show state; see [ShowStateEntity]. */
 @Dao
 interface ShowStateDao {
@@ -124,33 +127,25 @@ interface SearchHistoryDao {
     suspend fun trim(keep: Int)
 }
 
+/**
+ * The lifetime and per-day totals of what this device streamed.
+ *
+ * Both totals are accumulated with an UPDATE, and an INSERT only when there was no row to update, in
+ * one transaction. Not `INSERT … ON CONFLICT … DO UPDATE`: that upsert syntax arrived in SQLite 3.24,
+ * and Fire OS ships 3.8 (Fire OS 5), 3.9 (6) and 3.22 (7). Room checks queries against its own newer
+ * SQLite at build time, so the upsert compiled, then failed on every television with a syntax error
+ * that the recorder logs and drops, and "Data streamed" stayed at zero.
+ */
 @Dao
 interface ContributionDao {
 
     /**
      * Adds a delta to a title's lifetime totals, creating the row on first sight.
      *
-     * Written as an upsert in SQL rather than read-modify-write in Kotlin so the accumulation is
-     * atomic: the fold runs from a background tick while the contribution screen may be reading, and
-     * a lost update here silently loses someone's shared bytes.
+     * Atomic, because the fold runs from a background tick while the contribution screen may be
+     * reading, and a lost update here silently loses someone's shared bytes.
      */
-    @Query(
-        """
-        INSERT INTO contribution (
-            infoHash, title, uploadedBytes, downloadedBytes, sizeBytes,
-            firstSharedAtMs, lastActiveAtMs, stillOnDisk
-        )
-        VALUES (:infoHash, :title, :uploaded, :downloaded, :sizeBytes, :nowMs, :nowMs, :onDisk)
-        ON CONFLICT(infoHash) DO UPDATE SET
-            uploadedBytes = uploadedBytes + :uploaded,
-            downloadedBytes = downloadedBytes + :downloaded,
-            -- Size and title are refreshed because the first sighting may predate metadata arriving.
-            sizeBytes = MAX(sizeBytes, :sizeBytes),
-            title = CASE WHEN :title != '' THEN :title ELSE title END,
-            lastActiveAtMs = :nowMs,
-            stillOnDisk = :onDisk
-        """,
-    )
+    @Transaction
     suspend fun accumulate(
         infoHash: String,
         title: String,
@@ -159,7 +154,48 @@ interface ContributionDao {
         sizeBytes: Long,
         nowMs: Long,
         onDisk: Boolean,
+    ) {
+        if (addToTitle(infoHash, title, uploaded, downloaded, sizeBytes, nowMs, onDisk) > 0) return
+        val row = ContributionEntity(
+            infoHash = infoHash,
+            title = title,
+            uploadedBytes = uploaded,
+            downloadedBytes = downloaded,
+            sizeBytes = sizeBytes,
+            firstSharedAtMs = nowMs,
+            lastActiveAtMs = nowMs,
+            stillOnDisk = onDisk,
+        )
+        if (insertTitle(row) == NOT_INSERTED) addToTitle(infoHash, title, uploaded, downloaded, sizeBytes, nowMs, onDisk)
+    }
+
+    /** @return the rows changed: 0 when the title has no row yet. */
+    @Query(
+        """
+        UPDATE contribution SET
+            uploadedBytes = uploadedBytes + :uploaded,
+            downloadedBytes = downloadedBytes + :downloaded,
+            -- Size and title are refreshed because the first sighting may predate metadata arriving.
+            sizeBytes = MAX(sizeBytes, :sizeBytes),
+            title = CASE WHEN :title != '' THEN :title ELSE title END,
+            lastActiveAtMs = :nowMs,
+            stillOnDisk = :onDisk
+        WHERE infoHash = :infoHash
+        """,
     )
+    suspend fun addToTitle(
+        infoHash: String,
+        title: String,
+        uploaded: Long,
+        downloaded: Long,
+        sizeBytes: Long,
+        nowMs: Long,
+        onDisk: Boolean,
+    ): Int
+
+    /** @return the new row id, or [NOT_INSERTED] when the row already exists. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertTitle(row: ContributionEntity): Long
 
     @Query("SELECT * FROM contribution ORDER BY uploadedBytes DESC")
     fun observeAll(): Flow<List<ContributionEntity>>
@@ -174,16 +210,29 @@ interface ContributionDao {
     @Query("DELETE FROM contribution")
     suspend fun clear()
 
+    /** Adds a delta to one day's totals, creating the day on first sight. */
+    @Transaction
+    suspend fun accumulateDay(epochDay: Long, uploaded: Long, downloaded: Long) {
+        if (addToDay(epochDay, uploaded, downloaded) > 0) return
+        if (insertDay(ContributionDayEntity(epochDay, uploaded, downloaded)) == NOT_INSERTED) {
+            addToDay(epochDay, uploaded, downloaded)
+        }
+    }
+
+    /** @return the rows changed: 0 when the day has no row yet. */
     @Query(
         """
-        INSERT INTO contribution_day (epochDay, uploadedBytes, downloadedBytes)
-        VALUES (:epochDay, :uploaded, :downloaded)
-        ON CONFLICT(epochDay) DO UPDATE SET
+        UPDATE contribution_day SET
             uploadedBytes = uploadedBytes + :uploaded,
             downloadedBytes = downloadedBytes + :downloaded
+        WHERE epochDay = :epochDay
         """,
     )
-    suspend fun accumulateDay(epochDay: Long, uploaded: Long, downloaded: Long)
+    suspend fun addToDay(epochDay: Long, uploaded: Long, downloaded: Long): Int
+
+    /** @return the new row id, or [NOT_INSERTED] when the day already exists. */
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertDay(row: ContributionDayEntity): Long
 
     @Query("SELECT * FROM contribution_day WHERE epochDay >= :sinceEpochDay ORDER BY epochDay")
     fun observeDaysSince(sinceEpochDay: Long): Flow<List<ContributionDayEntity>>
