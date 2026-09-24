@@ -127,7 +127,7 @@ class DetailsViewModelTest {
         assertThat(show.selectedSeason?.number).isEqualTo(1)
         assertThat(show.nextUp?.id).isEqualTo(s1[0])
         assertThat(content.primaryAction).isEqualTo(PlayAction.Play(s1[0], restart = false))
-        assertThat(showPrimaryLabel(content.primaryAction, show)).isEqualTo("▶ Play S1 E1")
+        assertThat(showPrimaryLabel(content.primaryAction, show)).isEqualTo("Play S1 E1")
     }
 
     @Test
@@ -145,7 +145,7 @@ class DetailsViewModelTest {
         progressDao.rows.value = listOf(watched(s1[0], 1), ProgressEntity(s1[1], 12 * MINUTE + 40_000, 25 * MINUTE, false, 2))
         val content = viewModel(showId).content()
         assertThat(content.primaryAction).isEqualTo(PlayAction.Resume(s1[1], 12 * MINUTE + 40_000))
-        assertThat(showPrimaryLabel(content.primaryAction, content.show!!)).isEqualTo("▶ Resume S1 E2 · 12:40")
+        assertThat(showPrimaryLabel(content.primaryAction, content.show!!)).isEqualTo("Resume S1 E2 · 12:40")
     }
 
     @Test
@@ -153,7 +153,7 @@ class DetailsViewModelTest {
         progressDao.rows.value = (s1 + s2).mapIndexed { i, id -> watched(id, i.toLong()) }
         val content = viewModel(showId).content()
         assertThat(content.primaryAction).isEqualTo(PlayAction.Play(s1[0], restart = true))
-        assertThat(showPrimaryLabel(content.primaryAction, content.show!!)).isEqualTo("▶ Play again from S1 E1")
+        assertThat(showPrimaryLabel(content.primaryAction, content.show!!)).isEqualTo("Play again from S1 E1")
     }
 
     @Test

@@ -7,13 +7,15 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -21,15 +23,12 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.torfilx.core.model.Episode
 import com.torfilx.core.model.MediaItem
@@ -37,18 +36,25 @@ import com.torfilx.core.model.MediaSource
 import com.torfilx.core.model.PlayAction
 import com.torfilx.core.model.Season
 import com.torfilx.core.ui.component.ActionMenu
+import com.torfilx.core.ui.component.CapsText
 import com.torfilx.core.ui.component.EpisodeRow
 import com.torfilx.core.ui.component.ErrorState
+import com.torfilx.core.ui.component.Kicker
 import com.torfilx.core.ui.component.MenuAction
+import com.torfilx.core.ui.component.Plate
+import com.torfilx.core.ui.component.RowHeader
 import com.torfilx.core.ui.component.SeasonChips
-import com.torfilx.core.ui.component.SeriesBadge
 import com.torfilx.core.ui.component.SharingConsentDialog
-import com.torfilx.core.ui.component.SkeletonRow
-import com.torfilx.core.ui.component.TvButton
+import com.torfilx.core.ui.component.SkeletonBox
+import com.torfilx.core.ui.component.TvTextLink
+import com.torfilx.core.ui.component.kindAndYear
+import com.torfilx.core.ui.focus.bringIntoViewAsWhole
 import com.torfilx.core.ui.focus.keepNeighbourComposed
-import com.torfilx.core.ui.image.Artwork
 import com.torfilx.core.ui.theme.LocalTorfilxDimens
 import com.torfilx.core.ui.theme.TorfilxColors
+import com.torfilx.core.ui.theme.TorfilxType
+import com.torfilx.core.ui.theme.ruleAbove
+import com.torfilx.core.ui.theme.ruleBelow
 import com.torfilx.core.ui.util.Format
 import kotlinx.coroutines.delay
 
@@ -56,17 +62,23 @@ import kotlinx.coroutines.delay
 private const val FOCUS_ATTEMPTS = 6
 private const val FOCUS_RETRY_MS = 40L
 
+/** The spread's top margin: the tab bar is hidden here, so the page starts under the overscan inset. */
+private val SPREAD_TOP = 44.dp
+private val FACT_LABEL_WIDTH = 132.dp
+private const val MAX_FACTS = 3
+
 /**
- * Details for one title.
+ * Details for one title, set as a magazine spread: kicker, title, deck and a paragraph beside the
+ * poster as a plate, the actions as text links, and a short table of facts. A show's episodes follow
+ * as a numbered list.
  *
- * A film lists every quality the catalogue offers as a separate button, so the viewer chooses what to
- * stream rather than the app guessing. A show has one primary button — resume or play its next-up
+ * A film lists every quality the catalogue offers as a separate link, so the viewer chooses what to
+ * stream rather than the app guessing. A show has one primary link — resume or play its next-up
  * episode — above its seasons and episodes, where any episode can be played and the Menu key offers
  * a quality, or marks an episode or a whole season watched.
  *
- * Back is both the remote's Back key and a visible button, because on a full-screen backdrop there is
- * otherwise nothing that says "you can leave". With a menu or the consent dialog up, Back closes that
- * first.
+ * Back is both the remote's Back key and a visible link, because otherwise nothing on the page says
+ * "you can leave". With a menu or the consent dialog up, Back closes that first.
  */
 @Composable
 fun DetailsScreen(
@@ -155,83 +167,54 @@ private fun FilmDetails(
     onMarkWatched: (Boolean) -> Unit,
     onBack: () -> Unit,
 ) {
-    val dimens = LocalTorfilxDimens.current
     val sources = state.sources
-    Box(Modifier.fillMaxSize()) {
-        Backdrop(item = state.item, modifier = Modifier.fillMaxSize())
-
-        Column(
-            modifier = Modifier
-                .align(Alignment.CenterStart)
-                .padding(horizontal = dimens.overscanHorizontal)
-                .width(660.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text(
-                text = state.item.title,
-                style = MaterialTheme.typography.displayMedium,
-                color = TorfilxColors.TextPrimary,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            MetaRow(item = state.item)
-            state.item.overview?.let { overview ->
-                Text(
-                    text = overview,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TorfilxColors.TextSecondary,
-                    maxLines = 4,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            state.progress?.takeIf { it.fraction > 0f && !it.watched }?.let { progress ->
-                Text(
-                    text = "${Format.runtime(progress.remainingMs)} left",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = TorfilxColors.TextSecondary,
-                )
-            }
-
-            when {
-                !torrentAvailable -> Text(
-                    text = "BitTorrent is not available on this device, so this title cannot be played.",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = TorfilxColors.Error,
-                )
-
-                sources.isEmpty() -> Text(
-                    text = "This catalogue entry has no valid magnet link.",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = TorfilxColors.Error,
-                )
-
-                else -> Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    val watched = state.progress?.watched == true
+    // A long overview or a two-line title can run the spread past the bottom of the screen; the
+    // column scrolls to whatever link is focused.
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        Spread(
+            modifier = Modifier.bringIntoViewAsWhole(),
+            item = state.item,
+            facts = filmFacts(state.item, sources),
+            notice = {
+                state.progress?.takeIf { it.fraction > 0f && !it.watched }?.let { progress ->
+                    CapsText(
+                        text = "${Format.runtime(progress.remainingMs)} left",
+                        style = TorfilxType.MetaCaps,
+                        color = TorfilxColors.TextSecondary,
+                    )
+                }
+                when {
+                    !torrentAvailable -> Notice("BitTorrent is not available on this device, so this title cannot be played.")
+                    sources.isEmpty() -> Notice("This catalogue entry has no valid magnet link.")
+                }
+            },
+            primaryActions = {
+                if (torrentAvailable) {
                     sources.forEachIndexed { index, source ->
-                        TvButton(
+                        TvTextLink(
                             text = state.primaryAction.label(source, sources.size),
                             onClick = { onPlay(source) },
+                            arrow = index == 0,
                             autoFocus = index == 0,
                         )
                     }
                 }
-            }
-
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                TvButton(
-                    text = if (state.inMyList) "✓ My List" else "+ My List",
+            },
+            secondaryActions = {
+                TvTextLink(
+                    text = if (state.inMyList) "In My List ✓" else "Add to My List",
                     onClick = onToggleMyList,
-                    primary = false,
-                    // Nothing to play means no play button to land on; focus has to go somewhere.
+                    // Nothing to play means no play link to land on; focus has to go somewhere.
                     autoFocus = sources.isEmpty() || !torrentAvailable,
                 )
-                TvButton(
-                    text = if (state.progress?.watched == true) "Mark unwatched" else "Mark watched",
-                    onClick = { onMarkWatched(state.progress?.watched != true) },
-                    primary = false,
+                TvTextLink(
+                    text = if (watched) "Mark unwatched" else "Mark watched",
+                    onClick = { onMarkWatched(!watched) },
                 )
-                TvButton(text = "← Back", onClick = onBack, primary = false)
-            }
-        }
+                TvTextLink(text = "Back", onClick = onBack)
+            },
+        )
     }
 }
 
@@ -247,6 +230,7 @@ private fun ShowDetailsContent(
     onPlayEpisode: (Episode) -> Unit,
     onBack: () -> Unit,
 ) {
+    val dimens = LocalTorfilxDimens.current
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val primaryFocus = remember { FocusRequester() }
@@ -264,7 +248,7 @@ private fun ShowDetailsContent(
     val canPlay = viewModel.torrentAvailable && state.primaryAction != PlayAction.Unavailable
 
     // Initial focus, once content exists: back on the episode that was just played, or on the primary
-    // button. Requesting focus before a node is attached throws, so the request is retried briefly.
+    // link. Requesting focus before a node is attached throws, so the request is retried briefly.
     LaunchedEffect(state.item.id) {
         val returnTo = viewModel.lastPlayedEpisodeId?.let { id -> episodes.indexOfFirst { it.id == id } }?.takeIf { it >= 0 }
         if (returnTo != null) {
@@ -282,21 +266,45 @@ private fun ShowDetailsContent(
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
-        contentPadding = PaddingValues(bottom = LocalTorfilxDimens.current.overscanVertical * 2),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(bottom = dimens.overscanVertical * 2),
     ) {
         item(key = "header", contentType = "header") {
-            ShowHeader(
-                state = state,
-                show = show,
-                torrentAvailable = viewModel.torrentAvailable,
-                canPlay = canPlay,
-                primaryFocus = primaryFocus,
-                myListFocus = myListFocus,
-                onPlayPrimary = onPlayPrimary,
-                onToggleMyList = viewModel::toggleMyList,
-                onBack = onBack,
-            )
+            // Focus on a link shows the whole header, so the title never scrolls away from it.
+            Column(Modifier.bringIntoViewAsWhole()) {
+                Spread(
+                    item = state.item,
+                    facts = showFacts(state.item),
+                    notice = {
+                        if (!viewModel.torrentAvailable) {
+                            Notice("BitTorrent is not available on this device, so this show cannot be played.")
+                        } else if (state.primaryAction == PlayAction.Unavailable) {
+                            Notice("None of this show's episodes has a valid magnet link.")
+                        }
+                    },
+                    primaryActions = {
+                        if (canPlay) {
+                            TvTextLink(
+                                text = showPrimaryLabel(state.primaryAction, show),
+                                onClick = onPlayPrimary,
+                                arrow = true,
+                                focusRequester = primaryFocus,
+                            )
+                        }
+                        TvTextLink(
+                            text = if (state.inMyList) "In My List ✓" else "Add to My List",
+                            onClick = viewModel::toggleMyList,
+                            focusRequester = myListFocus,
+                        )
+                        TvTextLink(text = "Back", onClick = onBack)
+                    },
+                )
+                RowHeader(
+                    title = if (chipsShown) "Episodes" else show.selectedSeason?.name ?: "Episodes",
+                    numeral = Format.sectionNumeral(1),
+                    subtitle = episodeCount(episodes.size, if (chipsShown) show.selectedSeason?.name else null),
+                    modifier = Modifier.padding(top = 36.dp, bottom = if (chipsShown) 8.dp else 16.dp),
+                )
+            }
         }
 
         if (chipsShown) {
@@ -310,7 +318,9 @@ private fun ShowDetailsContent(
                         viewModel.openSeasonMenu(season)
                     },
                     focusRequesterFor = { season -> chipFocus.getOrPut(season.number) { FocusRequester() } },
-                    modifier = Modifier.keepNeighbourComposed(1, itemCount, listState, scope),
+                    modifier = Modifier
+                        .padding(bottom = 16.dp)
+                        .keepNeighbourComposed(1, itemCount, listState, scope),
                 )
             }
         }
@@ -319,9 +329,9 @@ private fun ShowDetailsContent(
             item(key = "empty", contentType = "empty") {
                 Text(
                     text = "This show has no episodes in the catalogue yet.",
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = TorfilxType.Caption,
                     color = TorfilxColors.TextSecondary,
-                    modifier = Modifier.padding(horizontal = LocalTorfilxDimens.current.overscanHorizontal),
+                    modifier = Modifier.padding(horizontal = dimens.overscanHorizontal),
                 )
             }
         } else {
@@ -333,7 +343,6 @@ private fun ShowDetailsContent(
                 EpisodeRow(
                     episode = episode,
                     progress = show.episodeProgress[episode.id],
-                    fallbackImage = state.item.images.backdrop ?: state.item.images.poster,
                     // An episode with no source says so in the row; OK on it does nothing more.
                     onClick = { if (episode.isPlayable && viewModel.torrentAvailable) onPlayEpisode(episode) },
                     onMenu = {
@@ -341,6 +350,7 @@ private fun ShowDetailsContent(
                         viewModel.openEpisodeMenu(episode)
                     },
                     focusRequester = requester,
+                    first = index == 0,
                     modifier = Modifier.keepNeighbourComposed(firstEpisodeIndex + index, itemCount, listState, scope),
                 )
             }
@@ -348,89 +358,21 @@ private fun ShowDetailsContent(
     }
 }
 
-@Composable
-private fun ShowHeader(
-    state: DetailsUiState.Content,
-    show: ShowDetails,
-    torrentAvailable: Boolean,
-    canPlay: Boolean,
-    primaryFocus: FocusRequester,
-    myListFocus: FocusRequester,
-    onPlayPrimary: () -> Unit,
-    onToggleMyList: () -> Unit,
-    onBack: () -> Unit,
-) {
-    val dimens = LocalTorfilxDimens.current
-    Box(Modifier.fillMaxWidth().height(HEADER_HEIGHT)) {
-        Backdrop(item = state.item, modifier = Modifier.fillMaxSize())
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(horizontal = dimens.overscanHorizontal)
-                .padding(bottom = 12.dp)
-                .width(700.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            SeriesBadge()
-            Text(
-                text = state.item.title,
-                style = MaterialTheme.typography.displayMedium,
-                color = TorfilxColors.TextPrimary,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-            )
-            MetaRow(item = state.item)
-            state.item.overview?.let { overview ->
-                Text(
-                    text = overview,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = TorfilxColors.TextSecondary,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (!torrentAvailable) {
-                Text(
-                    text = "BitTorrent is not available on this device, so this show cannot be played.",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = TorfilxColors.Error,
-                )
-            } else if (state.primaryAction == PlayAction.Unavailable) {
-                Text(
-                    text = "None of this show's episodes has a valid magnet link.",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = TorfilxColors.Error,
-                )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                if (canPlay) {
-                    TvButton(
-                        text = showPrimaryLabel(state.primaryAction, show),
-                        onClick = onPlayPrimary,
-                        focusRequester = primaryFocus,
-                    )
-                }
-                TvButton(
-                    text = if (state.inMyList) "✓ My List" else "+ My List",
-                    onClick = onToggleMyList,
-                    primary = false,
-                    focusRequester = myListFocus,
-                )
-                TvButton(text = "← Back", onClick = onBack, primary = false)
-            }
-        }
-    }
-}
-
-/** "▶ Resume S2 E3 · 12:40", "▶ Play S1 E1", "▶ Play again from S1 E1". */
+/** "Resume S2 E3 · 12:40", "Play S1 E1", "Play again from S1 E1". The link draws its own arrow. */
 internal fun showPrimaryLabel(action: PlayAction, show: ShowDetails): String {
     fun code(id: String) = show.seasons.firstNotNullOfOrNull { s -> s.episodes.firstOrNull { it.id == id } }?.code
     return when (action) {
         PlayAction.Unavailable -> "Unavailable"
-        is PlayAction.Resume -> "▶ Resume ${code(action.itemId).orEmpty()} · ${Format.timecode(action.positionMs)}"
+        is PlayAction.Resume -> "Resume ${code(action.itemId).orEmpty()} · ${Format.timecode(action.positionMs)}"
         is PlayAction.Play ->
-            if (action.restart) "▶ Play again from ${code(action.itemId).orEmpty()}" else "▶ Play ${code(action.itemId).orEmpty()}"
+            if (action.restart) "Play again from ${code(action.itemId).orEmpty()}" else "Play ${code(action.itemId).orEmpty()}"
     }.replace("  ", " ").trim()
+}
+
+/** "8 episodes", or "Season 2 · 8 episodes" when the season is chosen by chips below. */
+private fun episodeCount(count: Int, season: String?): String {
+    val episodes = if (count == 1) "1 episode" else "$count episodes"
+    return if (season != null) "$season · $episodes" else episodes
 }
 
 @Composable
@@ -448,7 +390,7 @@ private fun DetailsMenuOverlay(
                 // A quality choice only means something when there is more than one.
                 if (menu.sources.size > 1) {
                     menu.sources.forEach { source ->
-                        add(MenuAction("▶ Play in ${source.qualityLabel()}") { onPlaySource(episode, source) })
+                        add(MenuAction("Play in ${source.qualityLabel()}") { onPlaySource(episode, source) })
                     }
                 }
                 add(
@@ -490,83 +432,146 @@ private suspend fun requestWithRetry(requester: FocusRequester): Boolean {
     return false
 }
 
-private val HEADER_HEIGHT = 380.dp
+// --- The spread -----------------------------------------------------------------------------------
 
-// --- Shared ---------------------------------------------------------------------------------------
-
+/**
+ * The opening of a title: kicker, title, deck and a paragraph, then [notice] (what is left to watch,
+ * or why nothing can play), the actions as links — [primaryActions] on the first line and
+ * [secondaryActions], if any, on the next — and the facts; beside it all, the poster as a plate.
+ */
 @Composable
-private fun Backdrop(item: MediaItem, modifier: Modifier = Modifier) {
-    Box(modifier) {
-        Artwork(
-            url = item.images.backdrop ?: item.images.poster,
-            title = item.title,
-            seed = item.id,
-            showGeneratedLabel = false,
-            widthDp = 960.dp,
-            heightDp = 540.dp,
-            modifier = Modifier.fillMaxSize(),
-        )
-        Box(
-            Modifier.fillMaxSize().background(
-                Brush.horizontalGradient(
-                    0f to TorfilxColors.ScrimStrong,
-                    0.6f to TorfilxColors.ScrimSoft,
-                    1f to TorfilxColors.Transparent,
-                ),
-            ),
-        )
-        Box(
-            Modifier.fillMaxSize().background(
-                Brush.verticalGradient(
-                    0.55f to TorfilxColors.Transparent,
-                    1f to TorfilxColors.Background,
-                ),
-            ),
-        )
-    }
-}
-
-@Composable
-private fun MetaRow(item: MediaItem) {
+private fun Spread(
+    item: MediaItem,
+    facts: List<Pair<String, String>>,
+    notice: @Composable () -> Unit,
+    primaryActions: @Composable RowScope.() -> Unit,
+    modifier: Modifier = Modifier,
+    secondaryActions: (@Composable RowScope.() -> Unit)? = null,
+) {
+    val dimens = LocalTorfilxDimens.current
     Row(
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = dimens.overscanHorizontal)
+            .padding(top = SPREAD_TOP),
+        horizontalArrangement = Arrangement.spacedBy(56.dp),
     ) {
-        Format.rating(item.communityRating)?.let { rating ->
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Kicker(text = kindAndYear(item))
             Text(
-                text = "★ $rating",
-                style = MaterialTheme.typography.labelLarge,
-                color = TorfilxColors.Warning,
+                text = item.title,
+                style = TorfilxType.displayFor(item.title),
+                color = TorfilxColors.TextPrimary,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
             )
+            item.genres.take(3).takeIf { it.isNotEmpty() }?.let { genres ->
+                Text(
+                    text = genres.joinToString(", ") + ".",
+                    style = TorfilxType.Deck,
+                    color = TorfilxColors.TextSecondary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            item.overview?.takeIf { it.isNotBlank() }?.let { overview ->
+                Text(
+                    text = overview,
+                    style = TorfilxType.Reading,
+                    color = TorfilxColors.TextSecondary,
+                    maxLines = 4,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            notice()
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(36.dp),
+                modifier = Modifier.padding(top = 4.dp),
+                content = primaryActions,
+            )
+            secondaryActions?.let { actions ->
+                Row(horizontalArrangement = Arrangement.spacedBy(36.dp), content = actions)
+            }
+            if (facts.isNotEmpty()) Facts(facts, Modifier.padding(top = 12.dp))
         }
-        Text(
-            text = Format.metaLine(item),
-            style = MaterialTheme.typography.labelLarge,
-            color = TorfilxColors.TextSecondary,
-        )
+        Plate(item = item, label = "Plate I")
     }
 }
+
+/** A short table of facts between hairline rules: "RATING   8.4 / 10". */
+@Composable
+private fun Facts(facts: List<Pair<String, String>>, modifier: Modifier = Modifier) {
+    val hairline = LocalTorfilxDimens.current.hairline
+    Column(modifier.fillMaxWidth().ruleAbove(hairline)) {
+        facts.forEach { (label, value) ->
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .ruleBelow(hairline)
+                    .padding(vertical = 9.dp),
+            ) {
+                CapsText(
+                    text = label,
+                    style = TorfilxType.MetaCaps,
+                    color = TorfilxColors.TextTertiary,
+                    modifier = Modifier.width(FACT_LABEL_WIDTH),
+                )
+                CapsText(text = value, style = TorfilxType.MetaCaps, color = TorfilxColors.TextPrimary)
+            }
+        }
+    }
+}
+
+@Composable
+private fun Notice(text: String) {
+    Text(text = text, style = TorfilxType.Caption, color = TorfilxColors.Error)
+}
+
+private fun filmFacts(item: MediaItem, sources: List<MediaSource>): List<Pair<String, String>> = listOfNotNull(
+    Format.runtime(item.runtimeMs).takeIf { it.isNotEmpty() }?.let { "Running time" to it },
+    Format.rating(item.communityRating)?.let { "Rating" to "$it / 10" },
+    item.ageRating?.takeIf { it.isNotBlank() }?.let { "Rated" to it },
+    sources.mapNotNull { source -> source.label?.substringAfter("· ", "")?.takeIf { it.isNotBlank() } }
+        .takeIf { it.size > 1 }
+        ?.let { "Quality" to it.joinToString(", ") },
+).take(MAX_FACTS)
+
+private fun showFacts(item: MediaItem): List<Pair<String, String>> = listOfNotNull(
+    item.seasonCount.takeIf { it > 0 }?.let { "Seasons" to it.toString() },
+    item.episodeCount.takeIf { it > 0 }?.let { "Episodes" to it.toString() },
+    Format.rating(item.communityRating)?.let { "Rating" to "$it / 10" },
+    item.ageRating?.takeIf { it.isNotBlank() }?.let { "Rated" to it },
+).take(MAX_FACTS)
 
 @Composable
 private fun DetailsSkeleton() {
-    Column(
-        Modifier.fillMaxSize().padding(top = 60.dp),
-        verticalArrangement = Arrangement.spacedBy(24.dp),
+    val dimens = LocalTorfilxDimens.current
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .padding(horizontal = dimens.overscanHorizontal)
+            .padding(top = SPREAD_TOP),
+        horizontalArrangement = Arrangement.spacedBy(56.dp),
     ) {
-        SkeletonRow(landscape = true, count = 3)
-        SkeletonRow(count = 5)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            SkeletonBox(width = 180.dp, height = 14.dp)
+            SkeletonBox(width = 420.dp, height = 54.dp)
+            SkeletonBox(width = 260.dp, height = 22.dp)
+            repeat(3) { SkeletonBox(width = 560.dp, height = 16.dp) }
+        }
+        SkeletonBox(width = 192.dp, height = 280.dp)
     }
 }
 
 /**
- * Button label: the action for the film, plus the quality when there is more than one to choose
- * from ("▶ Resume · 1080p").
+ * Link label: the action for the film, plus the quality when there is more than one to choose from
+ * ("Resume 12:40 · 1080p").
  */
 private fun PlayAction.label(source: MediaSource, sourceCount: Int): String {
     val action = when (this) {
         PlayAction.Unavailable -> "Unavailable"
-        is PlayAction.Play -> if (restart) "▶ Play again" else "▶ Play"
-        is PlayAction.Resume -> "▶ Resume ${Format.timecode(positionMs)}"
+        is PlayAction.Play -> if (restart) "Play again" else "Play"
+        is PlayAction.Resume -> "Resume ${Format.timecode(positionMs)}"
     }
     if (sourceCount <= 1) return action
     val quality = source.label?.substringAfter("· ", "") ?: ""

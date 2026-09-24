@@ -4,7 +4,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -14,21 +13,22 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import com.torfilx.core.ui.theme.LocalTorfilxDimens
 import com.torfilx.core.ui.theme.TorfilxColors
+import com.torfilx.core.ui.theme.TorfilxShapes
+import com.torfilx.core.ui.theme.TorfilxType
+import com.torfilx.core.ui.theme.ruleBelow
 
 /** Which character set the on-screen keyboard is showing. */
 enum class KeyboardLayout(val label: String) {
@@ -126,31 +126,33 @@ private fun KeyboardKey(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val isFocused by interactionSource.collectIsFocusedAsState()
+    val hairline = LocalTorfilxDimens.current.hairline
+    val color = if (isFocused) TorfilxColors.TextOnAccent else TorfilxColors.TextPrimary
 
+    // A key is found by eye across a grid of them, so focus inverts it at once rather than easing in.
     Box(
         modifier = modifier
             .size(width = width, height = KEY_HEIGHT)
-            .clip(RoundedCornerShape(6.dp))
-            .background(if (isFocused) TorfilxColors.TextPrimary else TorfilxColors.SurfaceLow)
-            .border(
-                width = if (isFocused) 2.dp else 0.dp,
-                color = if (isFocused) TorfilxColors.Focus else TorfilxColors.Transparent,
-                shape = RoundedCornerShape(6.dp),
-            )
+            .background(if (isFocused) TorfilxColors.Accent else TorfilxColors.Transparent, TorfilxShapes.Control)
+            .border(hairline, if (isFocused) TorfilxColors.Accent else TorfilxColors.Rule, TorfilxShapes.Control)
             .then(focusRequester?.let { Modifier.focusRequester(it) } ?: Modifier)
             .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
             .semantics { contentDescription = description ?: label },
         contentAlignment = Alignment.Center,
     ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelLarge,
-            color = if (isFocused) TorfilxColors.Background else TorfilxColors.TextPrimary,
-        )
+        // Letters and marks in the serif; the word keys ("space", "clear", "ABC") in spaced capitals.
+        if (label.length == 1) {
+            Text(text = label, style = TorfilxType.ListTitle, color = color)
+        } else {
+            CapsText(text = label, style = TorfilxType.MetaCaps, color = color)
+        }
     }
 }
 
-/** The text field that the on-screen keyboard types into. */
+/** The placeholder, in italics at the size of the query it stands in for, so the field never changes height. */
+private val PLACEHOLDER_STYLE = TorfilxType.Deck.copy(fontSize = TorfilxType.SectionTitle.fontSize, lineHeight = TorfilxType.SectionTitle.lineHeight)
+
+/** The text field that the on-screen keyboard types into: the query set in the serif, over a rule. */
 @Composable
 fun SearchField(
     value: String,
@@ -160,18 +162,17 @@ fun SearchField(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(6.dp))
-            .background(TorfilxColors.SurfaceLow)
+            .ruleBelow(LocalTorfilxDimens.current.hairline, TorfilxColors.TextTertiary)
             // Announce it as the search field and read back the current query for VoiceView, which
             // otherwise sees only a static Text.
             .semantics {
                 contentDescription = if (value.isEmpty()) placeholder else "Search: $value"
             }
-            .padding(horizontal = 16.dp, vertical = 12.dp),
+            .padding(vertical = 10.dp),
     ) {
         Text(
             text = value.ifEmpty { placeholder },
-            style = MaterialTheme.typography.titleMedium,
+            style = if (value.isEmpty()) PLACEHOLDER_STYLE else TorfilxType.SectionTitle,
             color = if (value.isEmpty()) TorfilxColors.TextTertiary else TorfilxColors.TextPrimary,
             maxLines = 1,
         )

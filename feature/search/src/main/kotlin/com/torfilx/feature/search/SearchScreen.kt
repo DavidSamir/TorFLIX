@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -25,19 +26,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.torfilx.core.ui.component.KeyboardLayout
 import com.torfilx.core.ui.component.OnScreenKeyboard
 import com.torfilx.core.ui.component.PosterCard
+import com.torfilx.core.ui.component.RowHeader
 import com.torfilx.core.ui.component.SearchField
-import com.torfilx.core.ui.component.TvChip
+import com.torfilx.core.ui.component.TvTextLink
 import com.torfilx.core.ui.focus.keepNeighbourRowComposed
 import com.torfilx.core.ui.theme.LocalTorfilxDimens
 import com.torfilx.core.ui.theme.TorfilxColors
+import com.torfilx.core.ui.theme.TorfilxType
+import com.torfilx.core.ui.util.Format
 
 /**
  * Search: on-screen keyboard on the left, live results on the right.
@@ -70,11 +74,11 @@ fun SearchScreen(
             .fillMaxSize()
             .background(TorfilxColors.Background)
             .padding(horizontal = dimens.overscanHorizontal, vertical = dimens.overscanVertical),
-        horizontalArrangement = Arrangement.spacedBy(32.dp),
+        horizontalArrangement = Arrangement.spacedBy(40.dp),
     ) {
         Column(
-            modifier = Modifier.width(380.dp).fillMaxHeight(),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.width(KEYBOARD_COLUMN_WIDTH).fillMaxHeight(),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
             SearchField(
                 value = state.query,
@@ -120,9 +124,13 @@ fun SearchScreen(
                         .fillMaxSize()
                         .focusGroup()
                         .focusRestorer(),
-                    contentPadding = PaddingValues(bottom = 24.dp),
+                    // Room for a focused poster in the first row to rise, with its frame.
+                    contentPadding = PaddingValues(
+                        top = dimens.focusLift + dimens.focusFrameGap + dimens.focusFrame + 6.dp,
+                        bottom = 24.dp,
+                    ),
                     horizontalArrangement = Arrangement.spacedBy(dimens.cardSpacing),
-                    verticalArrangement = Arrangement.spacedBy(dimens.cardSpacing + 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(dimens.rowSpacing - 12.dp),
                 ) {
                     items(
                         count = state.results.size,
@@ -135,7 +143,7 @@ fun SearchScreen(
                             onClick = { onOpenDetails(result.card.item.id) },
                             // Same dead-end as every other lazy layout on this screen family: without
                             // it the results stop at the last composed row.
-                            modifier = Modifier.keepNeighbourRowComposed(
+                            modifier = Modifier.fillMaxWidth().wrapContentWidth().keepNeighbourRowComposed(
                                 index = index,
                                 itemCount = state.results.size,
                                 state = resultsState,
@@ -150,22 +158,24 @@ fun SearchScreen(
     }
 }
 
+/** Earlier searches, as a short numbered list of links. */
 @Composable
 private fun RecentSearches(
     recent: List<String>,
     onPick: (String) -> Unit,
     onClear: () -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(
-            text = "Recent searches",
-            style = MaterialTheme.typography.titleLarge,
-            color = TorfilxColors.TextPrimary,
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        RowHeader(
+            title = "Recent searches",
+            numeral = Format.sectionNumeral(1),
+            inset = 0.dp,
+            modifier = Modifier.padding(bottom = 12.dp),
         )
         recent.forEach { entry ->
-            TvChip(text = entry, selected = false, onClick = { onPick(entry) })
+            TvTextLink(text = entry, onClick = { onPick(entry) }, arrow = true)
         }
-        TvChip(text = "Clear history", selected = false, onClick = onClear)
+        TvTextLink(text = "Clear history", onClick = onClear, modifier = Modifier.padding(top = 12.dp))
     }
 }
 
@@ -174,20 +184,26 @@ private fun CenteredMessage(title: String, message: String) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.titleLarge,
+                style = TorfilxType.SectionTitle,
                 color = TorfilxColors.TextPrimary,
+                textAlign = TextAlign.Center,
             )
             Text(
                 text = message,
-                style = MaterialTheme.typography.bodyMedium,
+                style = TorfilxType.Caption,
                 color = TorfilxColors.TextSecondary,
+                textAlign = TextAlign.Center,
             )
         }
     }
 }
 
-private const val RESULT_COLUMNS = 4
+/** Six keys of 48 dp and their gaps, and nothing more, so the results get the rest of the page. */
+private val KEYBOARD_COLUMN_WIDTH = 330.dp
+
+/** Three 140 dp posters, with their gaps, fill what the keyboard leaves. */
+private const val RESULT_COLUMNS = 3

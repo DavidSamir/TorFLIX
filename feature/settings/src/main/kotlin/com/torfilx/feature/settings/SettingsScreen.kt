@@ -2,7 +2,6 @@ package com.torfilx.feature.settings
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
@@ -16,7 +15,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -28,7 +26,8 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -37,13 +36,20 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import com.torfilx.core.ui.component.CapsText
 import com.torfilx.core.ui.theme.LocalTorfilxDimens
 import com.torfilx.core.ui.theme.TorfilxColors
+import com.torfilx.core.ui.theme.TorfilxMotion
+import com.torfilx.core.ui.theme.TorfilxType
+import com.torfilx.core.ui.theme.animateFocus
+import com.torfilx.core.ui.theme.focusRowMark
+import com.torfilx.core.ui.theme.ruleBelow
 
 /** The settings, one category at a time. Sharing and Catalogue come first: nothing plays without them. */
 internal enum class SettingsCategory(val label: String, val summary: String) {
@@ -58,7 +64,6 @@ internal enum class SettingsCategory(val label: String, val summary: String) {
 }
 
 private val RAIL_WIDTH = 250.dp
-private val RailItemShape = RoundedCornerShape(8.dp)
 
 /**
  * Settings as a category list on the left and that category's settings on the right.
@@ -103,7 +108,7 @@ fun SettingsScreen(
                     bottom = dimens.overscanVertical,
                 )
                 .dpadEntersAt(selectedRailItem),
-            horizontalArrangement = Arrangement.spacedBy(32.dp),
+            horizontalArrangement = Arrangement.spacedBy(40.dp),
         ) {
             CategoryRail(
                 selected = selected,
@@ -196,27 +201,37 @@ private fun CategoryRail(
     }
 }
 
+/** The pane's title in the serif, its summary as an italic line, and a rule under both. */
 @Composable
 private fun PaneHeader(category: SettingsCategory) {
-    Column(Modifier.padding(start = ROW_INSET, end = ROW_INSET, bottom = 8.dp)) {
+    Column(
+        Modifier
+            .fillMaxWidth()
+            .padding(bottom = 8.dp)
+            .ruleBelow(LocalTorfilxDimens.current.hairline)
+            .padding(start = ROW_INSET, end = ROW_INSET, bottom = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
         Text(
             text = category.label,
-            style = MaterialTheme.typography.titleLarge,
+            style = TorfilxType.SectionTitle,
             color = TorfilxColors.TextPrimary,
         )
         Text(
             text = category.summary,
-            style = MaterialTheme.typography.labelMedium,
+            style = TorfilxType.Caption,
             color = TorfilxColors.TextSecondary,
         )
     }
 }
 
 /**
- * One category in the list. Focusing it shows the category; OK goes into it.
+ * One category in the list, set like a line in a table of contents. Focusing it shows the category;
+ * OK goes into it.
  *
- * The selected category keeps a raised background while focus is in its pane, so it is always clear
- * which category the pane belongs to.
+ * Focus marks the line with a wash and a rule down its edge, like an episode row. The selected
+ * category stays in ivory with a thin rule at its edge while focus is in its pane, so it is always
+ * clear which category the pane belongs to.
  */
 @Composable
 private fun CategoryItem(
@@ -229,28 +244,19 @@ private fun CategoryItem(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
+    val focus = animateFocus(focused, durationMs = TorfilxMotion.FOCUS_MS, label = "categoryFocus")
     LaunchedEffect(focused) { if (focused) onFocused() }
+    val dimens = LocalTorfilxDimens.current
 
-    val background = when {
-        focused -> TorfilxColors.TextPrimary
-        selected -> TorfilxColors.SurfaceHigh
-        else -> TorfilxColors.Transparent
-    }
     val labelColor = when {
-        focused -> TorfilxColors.Background
-        selected -> TorfilxColors.TextPrimary
-        else -> TorfilxColors.TextSecondary
+        focused || selected -> TorfilxColors.TextPrimary
+        else -> TorfilxColors.TextTertiary
     }
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RailItemShape)
-            .background(background)
-            .border(
-                width = if (focused) 2.dp else 0.dp,
-                color = if (focused) TorfilxColors.Focus else TorfilxColors.Transparent,
-                shape = RailItemShape,
-            )
+            .then(if (selected && !focused) Modifier.ruleAtStart(dimens.hairline) else Modifier)
+            .focusRowMark(focus, dimens.underline)
             .focusRequester(focusRequester)
             .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
             .semantics {
@@ -270,11 +276,12 @@ private fun CategoryItem(
             modifier = Modifier.weight(1f),
         )
         trailing?.let {
-            Text(
-                text = it,
-                style = MaterialTheme.typography.labelMedium,
-                color = if (focused) TorfilxColors.Background else TorfilxColors.TextTertiary,
-            )
+            CapsText(text = it, style = TorfilxType.MetaCaps, color = TorfilxColors.TextTertiary)
         }
     }
+}
+
+/** A hairline down the left edge: the chosen category, while focus is in its pane. */
+private fun Modifier.ruleAtStart(thickness: Dp): Modifier = drawBehind {
+    drawRect(TorfilxColors.TextTertiary, size = Size(thickness.toPx().coerceAtLeast(1f), size.height))
 }

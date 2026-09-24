@@ -1,5 +1,6 @@
 package com.torfilx.feature.home
 
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -10,7 +11,9 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -19,10 +22,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.torfilx.core.model.HeroItem
 import com.torfilx.core.model.HomeRowKind
@@ -32,9 +35,12 @@ import com.torfilx.core.ui.component.EmptyState
 import com.torfilx.core.ui.component.HeroSection
 import com.torfilx.core.ui.component.MediaRow
 import com.torfilx.core.ui.component.SkeletonRow
-import com.torfilx.core.ui.focus.keepNeighbourComposed
+import com.torfilx.core.ui.focus.SectionBringIntoViewSpec
+import com.torfilx.core.ui.focus.bringIntoViewAsWhole
 import com.torfilx.core.ui.theme.LocalTorfilxDimens
 import com.torfilx.core.ui.theme.TorfilxColors
+import com.torfilx.core.ui.theme.TorfilxType
+import com.torfilx.core.ui.theme.ruleBelow
 import kotlinx.coroutines.launch
 
 /**
@@ -93,6 +99,8 @@ fun HomeScreen(
     }
 }
 
+// LocalBringIntoViewSpec is how a list chooses where a focused item settles; still marked experimental.
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun HomeContent(
     state: HomeUiState.Content,
@@ -104,7 +112,10 @@ private fun HomeContent(
     val dimens = LocalTorfilxDimens.current
     val listState = rememberLazyListState()
     val heroPlayFocus = remember { FocusRequester() }
-    val scope = rememberCoroutineScope()
+    // The page moves a section at a time; the rows inside it keep the platform's sideways scrolling.
+    val density = LocalDensity.current
+    val rowScrolling = LocalBringIntoViewSpec.current
+    val pageScrolling = remember(density) { SectionBringIntoViewSpec(with(density) { SECTION_TOP_MARGIN.toPx() }) }
 
     // Initial focus lands on the hero Play button, and only once content exists — requesting focus
     // while the screen is still Loading silently fails (plan.md §5.2 rule 1).
@@ -112,7 +123,7 @@ private fun HomeContent(
         if (state.hero.isNotEmpty()) runCatching { heroPlayFocus.requestFocus() }
     }
 
-    Column(Modifier.fillMaxSize()) {
+    CompositionLocalProvider(LocalBringIntoViewSpec provides pageScrolling) {
         LazyColumn(
             state = listState,
             modifier = Modifier
@@ -126,7 +137,7 @@ private fun HomeContent(
                     val heroByCard = state.hero.associateBy { it.card.playableId }
                     HeroSection(
                         items = state.hero.map { it.card },
-                        primaryActionLabel = { card -> heroByCard[card.playableId]?.let(::heroLabel) ?: "▶ Play" },
+                        primaryActionLabel = { card -> heroByCard[card.playableId]?.let(::heroLabel) ?: "Play" },
                         onPlay = onPlay,
                         onMoreInfo = onCardClick,
                         onToggleMyList = onToggleMyList,
@@ -141,36 +152,40 @@ private fun HomeContent(
                 contentType = { "row" },
             ) { index ->
                 val row = state.rows[index]
-                MediaRow(
-                    // The hero occupies index 0 of the lazy column, so a row's position there is one
-                    // further along than its position in `rows`. Getting that off by one would nudge
-                    // the scroll to the wrong row and fight the focus instead of helping it.
-                    modifier = Modifier.keepNeighbourComposed(
-                        index = index + if (state.hero.isNotEmpty()) 1 else 0,
-                        itemCount = state.rows.size + 1,
-                        state = listState,
-                        scope = scope,
-                    ),
-                    title = row.title,
-                    items = row.items,
-                    totalItems = row.totalItems,
-                    seeAllIn = row.seeAllIn,
-                    landscape = row.kind == HomeRowKind.CONTINUE_WATCHING,
-                    onCardClick = { card ->
-                        if (row.kind == HomeRowKind.CONTINUE_WATCHING) onPlay(card) else onCardClick(card)
-                    },
-                    onCardLongClick = { card ->
-                        if (row.kind == HomeRowKind.CONTINUE_WATCHING) {
-                            onRemoveFromContinue(card)
-                        } else {
-                            onToggleMyList(card)
-                        }
-                    },
-                )
+                CompositionLocalProvider(LocalBringIntoViewSpec provides rowScrolling) {
+                    MediaRow(
+                        // A focused row is brought in whole and set at the top of the page, which leaves
+                        // the next row's header showing beneath it. That keeps the next row composed, so
+                        // Down always has somewhere to go; a scroll to keep it composed would only fight
+                        // this one.
+                        modifier = Modifier.bringIntoViewAsWhole(),
+                        title = row.title,
+                        // Sections are numbered down the page like a magazine's; the shows are ranked.
+                        section = index + 1,
+                        ranked = row.kind == HomeRowKind.SHOWS,
+                        items = row.items,
+                        totalItems = row.totalItems,
+                        seeAllIn = row.seeAllIn,
+                        landscape = row.kind == HomeRowKind.CONTINUE_WATCHING,
+                        onCardClick = { card ->
+                            if (row.kind == HomeRowKind.CONTINUE_WATCHING) onPlay(card) else onCardClick(card)
+                        },
+                        onCardLongClick = { card ->
+                            if (row.kind == HomeRowKind.CONTINUE_WATCHING) {
+                                onRemoveFromContinue(card)
+                            } else {
+                                onToggleMyList(card)
+                            }
+                        },
+                    )
+                }
             }
         }
     }
 }
+
+/** Where a focused section settles: this far below the masthead, so the two rules never touch. */
+private val SECTION_TOP_MARGIN = 16.dp
 
 @Composable
 private fun StaleBanner(message: String, modifier: Modifier = Modifier) {
@@ -179,11 +194,12 @@ private fun StaleBanner(message: String, modifier: Modifier = Modifier) {
         modifier
             .fillMaxWidth()
             .background(TorfilxColors.SurfaceHigh)
+            .ruleBelow(dimens.hairline)
             .padding(horizontal = dimens.overscanHorizontal, vertical = 8.dp),
     ) {
         Text(
             text = message,
-            style = MaterialTheme.typography.labelLarge,
+            style = TorfilxType.Caption,
             color = TorfilxColors.Warning,
         )
     }
@@ -207,18 +223,18 @@ private fun HomeSkeleton() {
 /**
  * The hero's play button: what it will actually do, taken from the resolved action.
  *
- * "▶ Resume S2 E3" for a show says which episode; a film just says "▶ Resume". Nothing playable reads
- * "Details", because that is where the button then goes.
+ * "Resume S2 E3" for a show says which episode; a film just says "Resume". Nothing playable reads
+ * "Details", because that is where the link then goes. The link draws its own arrow.
  */
 internal fun heroLabel(hero: HeroItem): String {
     val code = hero.card.episode?.code
     return when (val action = hero.action) {
         PlayAction.Unavailable -> "Details"
-        is PlayAction.Resume -> if (code != null) "▶ Resume $code" else "▶ Resume"
+        is PlayAction.Resume -> if (code != null) "Resume $code" else "Resume"
         is PlayAction.Play -> when {
-            action.restart -> "▶ Play again"
-            code != null -> "▶ Play $code"
-            else -> "▶ Play"
+            action.restart -> "Play again"
+            code != null -> "Play $code"
+            else -> "Play"
         }
     }
 }

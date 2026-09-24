@@ -13,19 +13,15 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -33,23 +29,29 @@ import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.torfilx.core.model.Episode
 import com.torfilx.core.model.PlaybackProgress
 import com.torfilx.core.model.ResumeRules
 import com.torfilx.core.model.Season
 import com.torfilx.core.ui.focus.onMenuKey
-import com.torfilx.core.ui.image.Artwork
-import com.torfilx.core.ui.theme.animateFocusScale
 import com.torfilx.core.ui.theme.LocalTorfilxDimens
 import com.torfilx.core.ui.theme.TorfilxColors
+import com.torfilx.core.ui.theme.TorfilxShapes
+import com.torfilx.core.ui.theme.TorfilxType
+import com.torfilx.core.ui.theme.animateFocus
+import com.torfilx.core.ui.theme.focusNudge
+import com.torfilx.core.ui.theme.focusRowMark
+import com.torfilx.core.ui.theme.ruleAbove
+import com.torfilx.core.ui.theme.ruleBelow
 import com.torfilx.core.ui.util.Format
 
-private const val EPISODE_FOCUS_SCALE = 1.02f
-private val EPISODE_THUMB_WIDTH = 176.dp
-private val EPISODE_THUMB_HEIGHT = 99.dp
+private val EPISODE_NUMBER_WIDTH = 44.dp
+private val EPISODE_STATUS_WIDTH = 150.dp
+private val EPISODE_PROGRESS_WIDTH = 96.dp
+private val EPISODE_NAME_NUDGE = 6.dp
 
 /**
  * The season selector on a show's details screen: one chip per season, Specials last.
@@ -74,8 +76,9 @@ fun SeasonChips(
             .fillMaxWidth()
             .focusGroup()
             .focusRestorer(),
-        contentPadding = PaddingValues(horizontal = dimens.overscanHorizontal),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        // The chips carry their own side padding; this lines their text up with the page edge.
+        contentPadding = PaddingValues(horizontal = dimens.overscanHorizontal - 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items(count = seasons.size, key = { seasons[it].number }) { index ->
             val season = seasons[index]
@@ -92,122 +95,106 @@ fun SeasonChips(
 }
 
 /**
- * One episode in a show's list: a still, its number and name, how long it runs, two lines of
- * overview, and how far the viewer got.
+ * One episode in a show's list, set as a line in a table of contents: its number in italics, its name,
+ * a line of summary, and how long it runs — then how far the viewer got.
+ *
+ * Focus lays a faint wash behind the row, grows a rule down its left edge, and steps the name forward,
+ * all drawn rather than laid out. No still per episode: a list of names reads faster than a wall of
+ * thumbnails, and it spares an image decode per row.
  *
  * An episode the catalogue offers no source for is still listed — the numbering must stay honest —
- * but greyed and labelled, and the screen decides what OK does with it.
+ * but dimmed and labelled, and the screen decides what OK does with it.
  */
 @Composable
 fun EpisodeRow(
     episode: Episode,
     progress: PlaybackProgress?,
-    fallbackImage: String?,
     onClick: () -> Unit,
     onMenu: () -> Unit,
     modifier: Modifier = Modifier,
     focusRequester: FocusRequester? = null,
+    /** The first row of its list, which also draws the rule above itself. */
+    first: Boolean = false,
 ) {
     val dimens = LocalTorfilxDimens.current
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
-    val scale by animateFocusScale(focused, focusedScale = EPISODE_FOCUS_SCALE, label = "episodeScale")
+    val focus = animateFocus(focused, label = "episodeFocus")
     val watched = progress?.let(ResumeRules::isWatched) == true
-    val shape = RoundedCornerShape(dimens.cornerRadius)
+    val inProgress = progress?.takeIf { it.fraction > 0f && !watched }
     val description = remember(episode, progress) { episode.accessibilityDescription(progress) }
 
     Row(
         modifier = modifier
             .fillMaxWidth()
             .padding(horizontal = dimens.overscanHorizontal)
-            .scale(scale)
-            .clip(shape)
-            .background(if (focused) TorfilxColors.SurfaceHigh else TorfilxColors.Transparent)
-            .border(
-                width = if (focused) dimens.focusBorderWidth else 0.dp,
-                color = if (focused) TorfilxColors.Focus else TorfilxColors.Transparent,
-                shape = shape,
-            )
+            .then(if (first) Modifier.ruleAbove(dimens.hairline) else Modifier)
+            .ruleBelow(dimens.hairline)
+            .focusRowMark(focus, dimens.underline)
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .onMenuKey(onMenu)
             .semantics { contentDescription = description }
-            .padding(10.dp),
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .padding(horizontal = 20.dp, vertical = 16.dp),
+        horizontalArrangement = Arrangement.spacedBy(20.dp),
     ) {
-        Box(
-            Modifier
-                .width(EPISODE_THUMB_WIDTH)
-                .height(EPISODE_THUMB_HEIGHT)
-                .clip(RoundedCornerShape(6.dp)),
-        ) {
-            Artwork(
-                url = episode.image ?: fallbackImage,
-                title = episode.displayName,
-                seed = episode.id,
-                widthDp = EPISODE_THUMB_WIDTH,
-                heightDp = EPISODE_THUMB_HEIGHT,
-                modifier = Modifier.fillMaxSize(),
-            )
-            progress?.takeIf { it.fraction > 0f && !watched }?.let {
-                CardProgressBar(fraction = it.fraction, modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth())
-            }
-            if (watched) {
-                Box(
-                    Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(4.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(TorfilxColors.ScrimStrong)
-                        .padding(horizontal = 6.dp),
-                ) {
-                    Text(text = "✓", style = MaterialTheme.typography.labelMedium, color = TorfilxColors.TextPrimary)
-                }
-            }
-        }
+        Text(
+            text = Format.rank(episode.number),
+            style = TorfilxType.SectionNumeral,
+            color = if (focused) TorfilxColors.TextPrimary else TorfilxColors.TextTertiary,
+            modifier = Modifier.width(EPISODE_NUMBER_WIDTH),
+        )
 
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "${episode.number}  ${episode.displayName}",
-                    style = MaterialTheme.typography.titleMedium,
-                    color = if (episode.isPlayable) TorfilxColors.TextPrimary else TorfilxColors.TextTertiary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f),
-                )
-                Format.runtime(episode.runtimeMs).takeIf { it.isNotEmpty() }?.let {
-                    Text(
-                        text = it,
-                        style = MaterialTheme.typography.labelLarge,
-                        color = TorfilxColors.TextSecondary,
-                        modifier = Modifier.padding(start = 12.dp),
-                    )
-                }
-            }
-            episode.overview?.let {
+        Column(
+            modifier = Modifier
+                .weight(1f)
+                .focusNudge(focus, EPISODE_NAME_NUDGE),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                text = episode.displayName,
+                style = TorfilxType.ListTitle,
+                color = when {
+                    !episode.isPlayable -> TorfilxColors.TextDisabled
+                    focused -> TorfilxColors.TextPrimary
+                    else -> TorfilxColors.TextSecondary
+                },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            episode.overview?.takeIf { it.isNotBlank() }?.let {
                 Text(
                     text = it,
-                    style = MaterialTheme.typography.labelLarge,
-                    color = TorfilxColors.TextSecondary,
+                    style = TorfilxType.Small,
+                    color = TorfilxColors.TextTertiary,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            if (!episode.isPlayable) {
-                Text(
-                    text = "No source for this episode",
-                    style = MaterialTheme.typography.labelMedium,
+        }
+
+        Column(
+            modifier = Modifier.width(EPISODE_STATUS_WIDTH),
+            horizontalAlignment = Alignment.End,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Format.runtime(episode.runtimeMs).takeIf { it.isNotEmpty() }?.let {
+                CapsText(text = it, style = TorfilxType.MetaCaps, color = TorfilxColors.TextTertiary)
+            }
+            when {
+                !episode.isPlayable -> CapsText(
+                    text = "No source",
+                    style = TorfilxType.MetaCaps,
                     color = TorfilxColors.Warning,
                 )
-            } else {
-                progress?.takeIf { it.fraction > 0f && !watched }?.let {
-                    Text(
-                        text = "${Format.runtime(it.remainingMs)} left",
-                        style = MaterialTheme.typography.labelMedium,
+                watched -> CapsText(text = "Watched ✓", style = TorfilxType.MetaCaps, color = TorfilxColors.TextSecondary)
+                inProgress != null -> {
+                    CapsText(
+                        text = "${Format.runtime(inProgress.remainingMs)} left",
+                        style = TorfilxType.MetaCaps,
                         color = TorfilxColors.TextSecondary,
                     )
+                    CardProgressBar(fraction = inProgress.fraction, modifier = Modifier.width(EPISODE_PROGRESS_WIDTH))
                 }
             }
         }
@@ -245,6 +232,7 @@ fun ActionMenu(
     onDismiss: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val dimens = LocalTorfilxDimens.current
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -253,20 +241,19 @@ fun ActionMenu(
     ) {
         Column(
             modifier = Modifier
-                .widthIn(min = 320.dp, max = 520.dp)
-                .clip(RoundedCornerShape(10.dp))
-                .background(TorfilxColors.Surface)
-                .padding(24.dp)
+                .widthIn(min = 340.dp, max = 520.dp)
+                .panel(dimens.hairline)
                 .focusProperties { onExit = { cancelFocusChange() } }
                 .focusGroup(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.titleLarge,
+                style = TorfilxType.SectionTitle,
                 color = TorfilxColors.TextPrimary,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.padding(bottom = 4.dp),
             )
             actions.forEachIndexed { index, action ->
                 TvButton(
@@ -302,17 +289,17 @@ fun NextEpisodeCard(
     Column(
         modifier = modifier
             .widthIn(max = 480.dp)
-            .clip(RoundedCornerShape(10.dp))
-            .background(TorfilxColors.ScrimStrong)
-            .padding(20.dp)
+            .background(TorfilxColors.ScrimStrong, TorfilxShapes.Panel)
+            .border(LocalTorfilxDimens.current.hairline, TorfilxColors.Rule, TorfilxShapes.Panel)
+            .padding(24.dp)
             .focusGroup(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Text(text = headline, style = MaterialTheme.typography.labelLarge, color = TorfilxColors.TextSecondary)
+        CapsText(text = headline, style = TorfilxType.KickerCaps, color = TorfilxColors.TextTertiary)
         title?.let {
             Text(
                 text = it,
-                style = MaterialTheme.typography.titleLarge,
+                style = TorfilxType.SectionTitle,
                 color = TorfilxColors.TextPrimary,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
@@ -321,13 +308,13 @@ fun NextEpisodeCard(
         detail?.let {
             Text(
                 text = it,
-                style = MaterialTheme.typography.labelLarge,
+                style = TorfilxType.Small,
                 color = TorfilxColors.TextSecondary,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 4.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.padding(top = 8.dp)) {
             TvButton(text = primaryLabel, onClick = onPrimary, autoFocus = true)
             if (secondaryLabel != null && onSecondary != null) {
                 TvButton(text = secondaryLabel, onClick = onSecondary, primary = false)
@@ -335,3 +322,9 @@ fun NextEpisodeCard(
         }
     }
 }
+
+/** A dialog or menu: a raised page with a hairline edge. */
+internal fun Modifier.panel(hairline: Dp): Modifier = this
+    .background(TorfilxColors.Surface, TorfilxShapes.Panel)
+    .border(hairline, TorfilxColors.Rule, TorfilxShapes.Panel)
+    .padding(32.dp)

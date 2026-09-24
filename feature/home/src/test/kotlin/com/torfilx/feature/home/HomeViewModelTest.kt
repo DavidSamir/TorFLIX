@@ -76,7 +76,7 @@ class HomeViewModelTest {
         val showHero = content.hero.first { it.card.item.id == showId }
         assertThat(showHero.card.episode?.id).isEqualTo(s1[0])
         assertThat(showHero.action).isEqualTo(PlayAction.Play(s1[0], restart = false))
-        assertThat(heroLabel(showHero)).isEqualTo("▶ Play S1 E1")
+        assertThat(heroLabel(showHero)).isEqualTo("Play S1 E1")
     }
 
     @Test
@@ -89,7 +89,7 @@ class HomeViewModelTest {
         assertThat(continueRow.items.single().playableId).isEqualTo(s1[1])
         val hero = content.hero.first()
         assertThat(hero.action).isEqualTo(PlayAction.Resume(s1[1], 10 * MINUTE))
-        assertThat(heroLabel(hero)).isEqualTo("▶ Resume S1 E2")
+        assertThat(heroLabel(hero)).isEqualTo("Resume S1 E2")
 
         // Play on the Continue Watching card plays that episode.
         assertThat(vm.playActionFor(continueRow.items.single())).isEqualTo(PlayAction.Resume(s1[1], 10 * MINUTE))
@@ -122,11 +122,11 @@ class HomeViewModelTest {
         val show = MediaItem(id = "s", title = "S", kind = MediaKind.SHOW)
         val episode = Episode(id = "e", showId = "s", season = 2, number = 3)
 
-        assertThat(heroLabel(HeroItem(film, PlayAction.Play("f", restart = false)))).isEqualTo("▶ Play")
-        assertThat(heroLabel(HeroItem(film, PlayAction.Play("f", restart = true)))).isEqualTo("▶ Play again")
-        assertThat(heroLabel(HeroItem(film, PlayAction.Resume("f", 5)))).isEqualTo("▶ Resume")
+        assertThat(heroLabel(HeroItem(film, PlayAction.Play("f", restart = false)))).isEqualTo("Play")
+        assertThat(heroLabel(HeroItem(film, PlayAction.Play("f", restart = true)))).isEqualTo("Play again")
+        assertThat(heroLabel(HeroItem(film, PlayAction.Resume("f", 5)))).isEqualTo("Resume")
         assertThat(heroLabel(HeroItem(film, PlayAction.Unavailable))).isEqualTo("Details")
-        assertThat(heroLabel(HeroItem(MediaCard(show, episode = episode), PlayAction.Resume("e", 5)))).isEqualTo("▶ Resume S2 E3")
+        assertThat(heroLabel(HeroItem(MediaCard(show, episode = episode), PlayAction.Resume("e", 5)))).isEqualTo("Resume S2 E3")
     }
 
     private companion object {

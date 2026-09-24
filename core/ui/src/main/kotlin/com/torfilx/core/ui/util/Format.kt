@@ -73,6 +73,20 @@ object Format {
     fun percentComplete(positionMs: Long, durationMs: Long): Int =
         if (durationMs <= 0) 0 else ((positionMs.toDouble() / durationMs) * 100).roundToInt().coerceIn(0, 100)
 
+    /**
+     * A section number in lower-case roman numerals with a full stop: `i.`, `iv.`, `xii.`. Past 39
+     * — more sections than any page has — it falls back to digits.
+     */
+    fun sectionNumeral(n: Int): String {
+        if (n !in 1..39) return "$n."
+        return "x".repeat(n / 10) + ROMAN_UNITS[n % 10] + "."
+    }
+
+    private val ROMAN_UNITS = arrayOf("", "i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix")
+
+    /** A row number set on a poster: `01`, `12`, `100`. */
+    fun rank(n: Int): String = n.toString().padStart(2, '0')
+
     /** Download speed: `1.2 MB/s`, `840 KB/s`, `0 KB/s`. */
     fun speed(bytesPerSecond: Int): String {
         val bps = bytesPerSecond.coerceAtLeast(0)

@@ -1,40 +1,58 @@
 package com.torfilx.core.ui.theme
 
-import androidx.compose.ui.graphics.Color
-
 /**
- * TV palette (plan.md §4).
+ * What each colour is for (plan.md §4). The inks themselves live in [Palette].
  *
- * Pure white is deliberately absent: on a TV at full backlight it clips and blooms, so the lightest
- * text is #E5E5E5. Every text colour here clears 4.5:1 against its intended background.
+ * A plain object rather than a CompositionLocal: the app has one look and never switches it, so a
+ * colour is a static field read, with nothing for Compose to track.
  */
 object TorfilxColors {
-    val Background = Color(0xFF141414)
-    val SurfaceLow = Color(0xFF1B1B1B)
-    val Surface = Color(0xFF1F1F1F)
-    val SurfaceHigh = Color(0xFF2A2A2A)
-    val SurfaceHighest = Color(0xFF383838)
+    // The page and the panels laid on it.
+    val Background = Palette.Ink
+    val SurfaceLow = Palette.InkRaised
+    val Surface = Palette.InkRaised
+    val SurfaceHigh = Palette.InkHigh
+    val SurfaceHighest = Palette.InkHighest
 
-    val TextPrimary = Color(0xFFE5E5E5)
-    val TextSecondary = Color(0xFFB3B3B3)
-    val TextTertiary = Color(0xFF8C8C8C)
-    val TextOnAccent = Color(0xFFFFFFFF)
+    // Headlines and focused text; reading text and captions; labels, metadata and hints.
+    val TextPrimary = Palette.Ivory
+    val TextSecondary = Palette.IvorySoft
+    val TextTertiary = Palette.Dim
+    val TextDisabled = Palette.Faint
 
-    val Accent = Color(0xFFE23B3B)
-    val AccentDim = Color(0xFF8E2020)
-    val Focus = Color(0xFFF5F5F5)
+    /**
+     * The accent is the ivory itself: selection, progress and focus are drawn in the same ink as the
+     * headlines, never in a brand colour.
+     */
+    val Accent = Palette.Ivory
+    val TextOnAccent = Palette.Ink
 
-    val Success = Color(0xFF4CAF50)
-    val Warning = Color(0xFFFFB300)
-    val Error = Color(0xFFFF5252)
+    /** Hairline rules between sections, facts and list rows. */
+    val Rule = Palette.IvoryRule
 
-    val ScrimStrong = Color(0xE6141414)
-    val ScrimSoft = Color(0x99141414)
-    val Transparent = Color(0x00000000)
+    /** The solid edge of a focused control, and a focused underline. */
+    val Focus = Palette.Ivory
+
+    /** The thin frame that stands off a focused poster. */
+    val FocusFrame = Palette.IvoryFrame
+
+    /** The faint wash behind a focused list row. */
+    val FocusWash = Palette.IvoryWash
+
+    /** Row numbers on posters ("01", "02"), before the poster is focused. */
+    val Numeral = Palette.IvoryNumeral
+
+    val Success = Palette.Sage
+    val Warning = Palette.Ochre
+    val Error = Palette.Terracotta
+
+    val ScrimStrong = Palette.InkScrim
+    val ScrimSoft = Palette.InkVeil
+    val Transparent = Palette.Clear
 
     /** Behind video: true black, so letterbox bars disappear into the TV's own black. */
-    val VideoBackground = Color(0xFF000000)
+    val VideoBackground = Palette.Black
 
-    val ProgressTrack = Color(0x66FFFFFF)
+    val ProgressTrack = Palette.IvoryTrack
     val ProgressFill = Accent
 }

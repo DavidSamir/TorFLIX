@@ -1,6 +1,5 @@
 package com.torfilx.feature.settings
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
@@ -13,9 +12,9 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -24,7 +23,6 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.focusProperties
@@ -36,8 +34,16 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import com.torfilx.core.ui.component.CapsText
 import com.torfilx.core.ui.component.TvChip
+import com.torfilx.core.ui.theme.LocalTorfilxDimens
 import com.torfilx.core.ui.theme.TorfilxColors
+import com.torfilx.core.ui.theme.TorfilxMotion
+import com.torfilx.core.ui.theme.TorfilxShapes
+import com.torfilx.core.ui.theme.TorfilxType
+import com.torfilx.core.ui.theme.animateFocus
+import com.torfilx.core.ui.theme.focusRowMark
+import com.torfilx.core.ui.theme.ruleBelow
 import kotlinx.coroutines.delay
 
 /*
@@ -52,15 +58,19 @@ import kotlinx.coroutines.delay
  */
 
 /** Horizontal inset of a row's content; labels, descriptions and chips all line up on it. */
-internal val ROW_INSET = 16.dp
+internal val ROW_INSET = 20.dp
 
-private val RowShape = RoundedCornerShape(8.dp)
-private val PillShape = RoundedCornerShape(20.dp)
+/** A chip's own side padding, by which a set of chips is pulled left to line its text up. */
+private val CHIP_TEXT_INSET = 12.dp
+
 
 /** How long a destructive row waits for its second press before it forgets the first. */
 private const val CONFIRM_WINDOW_MS = 4_000L
 
-/** A full-width focusable row. OK runs [onClick]. */
+/**
+ * A full-width focusable row, ruled off from the next like a line in a table. OK runs [onClick].
+ * Focus marks it the way it marks an episode: a wash behind it and a rule down its edge.
+ */
 @Composable
 internal fun SettingsRow(
     onClick: () -> Unit,
@@ -70,21 +80,18 @@ internal fun SettingsRow(
 ) {
     val interactionSource = remember { MutableInteractionSource() }
     val focused by interactionSource.collectIsFocusedAsState()
+    val focus = animateFocus(focused, durationMs = TorfilxMotion.FOCUS_MS, label = "settingsRowFocus")
+    val dimens = LocalTorfilxDimens.current
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RowShape)
-            .background(if (focused) TorfilxColors.SurfaceHigh else TorfilxColors.Transparent)
-            .border(
-                width = if (focused) 2.dp else 0.dp,
-                color = if (focused) TorfilxColors.Focus else TorfilxColors.Transparent,
-                shape = RowShape,
-            )
+            .ruleBelow(dimens.hairline)
+            .focusRowMark(focus, dimens.underline)
             .then(if (focusRequester != null) Modifier.focusRequester(focusRequester) else Modifier)
             // `clickable` is the focus target and handles DPAD_CENTER; see TvButton for why there is
             // no separate `focusable()`.
             .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
-            .padding(horizontal = ROW_INSET, vertical = 12.dp),
+            .padding(horizontal = ROW_INSET, vertical = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -132,7 +139,7 @@ internal fun ActionRow(
     ) {
         SettingLabel(label, description, Modifier.weight(1f))
         trailing?.let {
-            Text(text = it, style = MaterialTheme.typography.labelLarge, color = TorfilxColors.TextSecondary)
+            CapsText(text = it, style = TorfilxType.MetaCaps, color = TorfilxColors.TextSecondary)
         }
     }
 }
@@ -218,9 +225,10 @@ internal fun ChipGroup(label: String, description: String?, chips: @Composable (
     ) {
         SettingLabel(label, description)
         FlowRow(
-            modifier = Modifier.dpadEntersAt(entry),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp),
+            // The chips carry their own side padding; this lines their text up with the label.
+            modifier = Modifier.offset(x = -CHIP_TEXT_INSET).dpadEntersAt(entry),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             chips(entry)
         }
@@ -259,25 +267,29 @@ internal fun SettingLabel(label: String, description: String?, modifier: Modifie
         description?.let {
             Text(
                 text = it,
-                style = MaterialTheme.typography.labelMedium,
-                color = TorfilxColors.TextSecondary,
+                style = TorfilxType.Small,
+                color = TorfilxColors.TextTertiary,
             )
         }
     }
 }
 
+/** On or off, as a small spaced label: ivory in a hairline box when on, dim and unboxed when off. */
 @Composable
 private fun ValuePill(text: String, on: Boolean) {
     Box(
         modifier = Modifier
-            .clip(PillShape)
-            .background(if (on) TorfilxColors.Accent else TorfilxColors.SurfaceHighest)
-            .padding(horizontal = 14.dp, vertical = 6.dp),
+            .border(
+                LocalTorfilxDimens.current.hairline,
+                if (on) TorfilxColors.FocusFrame else TorfilxColors.Transparent,
+                TorfilxShapes.Control,
+            )
+            .padding(horizontal = 12.dp, vertical = 5.dp),
     ) {
-        Text(
+        CapsText(
             text = text,
-            style = MaterialTheme.typography.labelMedium,
-            color = if (on) TorfilxColors.TextOnAccent else TorfilxColors.TextSecondary,
+            style = TorfilxType.MetaCaps,
+            color = if (on) TorfilxColors.TextPrimary else TorfilxColors.TextTertiary,
         )
     }
 }
@@ -287,20 +299,20 @@ private fun ValuePill(text: String, on: Boolean) {
 internal fun InfoText(text: String, color: androidx.compose.ui.graphics.Color = TorfilxColors.TextSecondary) {
     Text(
         text = text,
-        style = MaterialTheme.typography.labelMedium,
+        style = TorfilxType.Small,
         color = color,
         modifier = Modifier.padding(horizontal = ROW_INSET, vertical = 4.dp),
     )
 }
 
-/** A heading inside a pane, for a group of rows that belong together. */
+/** A heading inside a pane, for a group of rows that belong together: a spaced label. */
 @Composable
 internal fun SubHeading(text: String) {
-    Text(
+    CapsText(
         text = text,
-        style = MaterialTheme.typography.titleMedium,
-        color = TorfilxColors.TextPrimary,
-        modifier = Modifier.padding(start = ROW_INSET, end = ROW_INSET, top = 16.dp, bottom = 4.dp),
+        style = TorfilxType.KickerCaps,
+        color = TorfilxColors.TextTertiary,
+        modifier = Modifier.padding(start = ROW_INSET, end = ROW_INSET, top = 22.dp, bottom = 6.dp),
     )
 }
 
@@ -310,22 +322,29 @@ internal fun MessageLine(message: SettingsMessage?, section: MessageSection) {
     if (message == null || message.section != section) return
     Text(
         text = message.text,
-        style = MaterialTheme.typography.labelLarge,
+        style = TorfilxType.Caption,
         color = TorfilxColors.TextPrimary,
         modifier = Modifier.padding(horizontal = ROW_INSET, vertical = 8.dp),
     )
 }
 
-/** A label and a value, for the read-only tables in About and Sharing. */
+/** A label and a value, for the read-only tables in About and Sharing: a line of a facts table. */
 @Composable
 internal fun InfoLine(label: String, value: String) {
-    Row(Modifier.padding(horizontal = ROW_INSET)) {
-        Text(
+    Row(
+        Modifier
+            .padding(horizontal = ROW_INSET)
+            .fillMaxWidth()
+            .ruleBelow(LocalTorfilxDimens.current.hairline)
+            .padding(vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        CapsText(
             text = label,
-            style = MaterialTheme.typography.bodyMedium,
-            color = TorfilxColors.TextSecondary,
+            style = TorfilxType.MetaCaps,
+            color = TorfilxColors.TextTertiary,
             modifier = Modifier.width(180.dp),
         )
-        Text(text = value, style = MaterialTheme.typography.bodyMedium, color = TorfilxColors.TextPrimary)
+        Text(text = value, style = TorfilxType.Small, color = TorfilxColors.TextPrimary)
     }
 }

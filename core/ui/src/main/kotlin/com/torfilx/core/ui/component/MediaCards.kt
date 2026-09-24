@@ -1,50 +1,54 @@
 package com.torfilx.core.ui.component
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.torfilx.core.model.MediaCard
+import com.torfilx.core.ui.focus.bringIntoViewAsWhole
 import com.torfilx.core.ui.focus.onMenuKey
 import com.torfilx.core.ui.image.Artwork
-import com.torfilx.core.ui.theme.animateFocusScale
 import com.torfilx.core.ui.theme.LocalTorfilxDimens
 import com.torfilx.core.ui.theme.TorfilxColors
+import com.torfilx.core.ui.theme.TorfilxShapes
+import com.torfilx.core.ui.theme.TorfilxType
+import com.torfilx.core.ui.theme.animateFocus
+import com.torfilx.core.ui.theme.focusFrame
+import com.torfilx.core.ui.theme.focusLift
 import com.torfilx.core.ui.util.Format
+
+/** How far a row number hangs off the poster's left edge, and below its foot. */
+private val NUMERAL_OVERHANG_X = 14.dp
+private val NUMERAL_OVERHANG_Y = 16.dp
 
 /**
  * The poster card used in every row and grid.
  *
- * Focus behaviour is the whole point (plan.md §4, §5): a scale-up plus a high-contrast border that
- * appears immediately, never colour alone, and an accessible description that says what the card is
- * and how far it has been watched (VoiceView reads this aloud on Fire TV).
+ * Focus (plan.md §4, §5): the poster rises and a thin ivory frame appears around it, standing off its
+ * edge, and its caption brightens — never colour alone. The accessible description says what the card
+ * is and how far it has been watched (VoiceView reads it aloud on Fire TV).
+ *
+ * [numeral] sets a row number ("01") in large italics across the poster's foot, for ranked rows.
  */
 @Composable
 fun PosterCard(
@@ -53,6 +57,7 @@ fun PosterCard(
     modifier: Modifier = Modifier,
     onLongClick: (() -> Unit)? = null,
     interactionSource: MutableInteractionSource? = null,
+    numeral: String? = null,
 ) {
     val dimens = LocalTorfilxDimens.current
     FocusableMediaCard(
@@ -64,6 +69,7 @@ fun PosterCard(
         artworkUrl = card.item.images.poster,
         modifier = modifier,
         interactionSource = interactionSource,
+        numeral = numeral,
     )
 }
 
@@ -99,33 +105,29 @@ private fun FocusableMediaCard(
     card: MediaCard,
     onClick: () -> Unit,
     onLongClick: (() -> Unit)?,
-    widthDp: androidx.compose.ui.unit.Dp,
-    heightDp: androidx.compose.ui.unit.Dp,
+    widthDp: Dp,
+    heightDp: Dp,
     artworkUrl: String?,
     modifier: Modifier = Modifier,
     interactionSource: MutableInteractionSource? = null,
+    numeral: String? = null,
 ) {
     val dimens = LocalTorfilxDimens.current
     val source = interactionSource ?: remember { MutableInteractionSource() }
     val isFocused by source.collectIsFocusedAsState()
-    val scale by animateFocusScale(isFocused, label = "cardScale")
+    // Drives the lift and the frame from the draw phase: a focus change recomposes this card once, for
+    // the caption's colour, and every frame of the movement after that is only a redraw.
+    val focus = animateFocus(isFocused, label = "cardFocus")
+    val description = remember(card) { card.accessibilityDescription() }
 
-    val shape = RoundedCornerShape(dimens.cornerRadius)
-    val description = remember(card, isFocused) { card.accessibilityDescription() }
-
-    Column(modifier = modifier.width(widthDp)) {
+    // Brought into view whole, caption and all: the caption is part of how focus shows.
+    Column(modifier = modifier.width(widthDp).bringIntoViewAsWhole()) {
+        // The focus target stays where it is laid out; only what it draws rises. Focus search measures
+        // from the focused card, and a card lifted in place would make every neighbour count as
+        // "below" it, so Down would step sideways along the row instead of to the next one.
         Box(
             modifier = Modifier
-                .width(widthDp)
-                .height(heightDp)
-                .scale(scale)
-                .clip(shape)
-                .background(TorfilxColors.SurfaceLow)
-                .border(
-                    width = if (isFocused) dimens.focusBorderWidth else 0.dp,
-                    color = if (isFocused) TorfilxColors.Focus else TorfilxColors.Transparent,
-                    shape = shape,
-                )
+                .size(widthDp, heightDp)
                 .clickable(
                     interactionSource = source,
                     indication = null,
@@ -136,70 +138,98 @@ private fun FocusableMediaCard(
                 .onMenuKey { onLongClick?.invoke() }
                 .semantics { contentDescription = description },
         ) {
-            Artwork(
-                url = artworkUrl,
-                title = card.item.title,
-                seed = card.item.id,
+            CardFace(
+                card = card,
+                artworkUrl = artworkUrl,
                 widthDp = widthDp,
                 heightDp = heightDp,
-                modifier = Modifier.fillMaxSize(),
+                focused = isFocused,
+                numeral = numeral,
+                modifier = Modifier
+                    .matchParentSize()
+                    .focusLift(focus, dimens.focusLift)
+                    .focusFrame(focus, dimens.focusFrame, dimens.focusFrameGap)
+                    .background(TorfilxColors.SurfaceLow, TorfilxShapes.Card),
             )
-
-            card.progress?.takeIf { it.fraction > 0f && !it.watched }?.let { progress ->
-                CardProgressBar(
-                    fraction = progress.fraction,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth(),
-                )
-            }
-
-            if (card.isWatched) {
-                WatchedBadge(modifier = Modifier.align(Alignment.TopEnd).padding(6.dp))
-            }
-
-            // A show's poster looks exactly like a film's; the label says which it is.
-            if (card.item.isShow && card.episode == null) {
-                SeriesBadge(modifier = Modifier.align(Alignment.TopStart).padding(6.dp))
-            }
         }
 
-        // The label sits under the card and only renders for the focused item, which keeps the row
-        // visually calm and avoids laying out text for off-screen cards.
-        if (isFocused) {
-            CardLabel(card = card, widthDp = widthDp)
+        CardCaption(card = card, focused = isFocused, topGap = dimens.captionGap)
+    }
+}
+
+/** What a card shows: its artwork, how far it has been watched, and its row number. */
+@Composable
+private fun CardFace(
+    card: MediaCard,
+    artworkUrl: String?,
+    widthDp: Dp,
+    heightDp: Dp,
+    focused: Boolean,
+    numeral: String?,
+    modifier: Modifier = Modifier,
+) {
+    Box(modifier) {
+        Artwork(
+            url = artworkUrl,
+            title = card.item.title,
+            seed = card.item.id,
+            widthDp = widthDp,
+            heightDp = heightDp,
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        card.progress?.takeIf { it.fraction > 0f && !it.watched }?.let { progress ->
+            CardProgressBar(
+                fraction = progress.fraction,
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .fillMaxWidth(),
+            )
+        }
+
+        if (card.isWatched) {
+            WatchedBadge(modifier = Modifier.align(Alignment.TopEnd).padding(6.dp))
+        }
+
+        numeral?.let {
+            Text(
+                text = it,
+                style = TorfilxType.Numeral,
+                color = if (focused) TorfilxColors.TextPrimary else TorfilxColors.Numeral,
+                maxLines = 1,
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .offset(x = -NUMERAL_OVERHANG_X, y = NUMERAL_OVERHANG_Y),
+            )
         }
     }
 }
 
+/**
+ * The caption under every card: the title in italics, and a spaced line of what it is or what is
+ * left. Always there, so a row reads like a contents page; two fixed lines, so every card in a row is
+ * the same height and vertical navigation never jumps.
+ */
 @Composable
-private fun CardLabel(card: MediaCard, widthDp: androidx.compose.ui.unit.Dp) {
-    Column(
-        modifier = Modifier
-            .width(widthDp)
-            .padding(top = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
+private fun CardCaption(card: MediaCard, focused: Boolean, topGap: Dp) {
+    Column(Modifier.fillMaxWidth().padding(top = topGap)) {
         Text(
             text = card.item.title,
-            style = MaterialTheme.typography.labelLarge,
-            color = TorfilxColors.TextPrimary,
+            style = TorfilxType.CardTitle,
+            color = if (focused) TorfilxColors.TextPrimary else TorfilxColors.TextSecondary,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        val subtitle = card.subtitle()
-        if (subtitle.isNotEmpty()) {
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.labelMedium,
-                color = TorfilxColors.TextSecondary,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
+        CapsText(
+            text = card.subtitle(),
+            style = TorfilxType.MetaCaps,
+            color = TorfilxColors.TextTertiary,
+            modifier = Modifier.padding(top = 2.dp),
+        )
     }
 }
 
+/** A thin ivory line along the foot of a card, for how far it has been watched. */
 @Composable
 fun CardProgressBar(
     fraction: Float,
@@ -207,17 +237,13 @@ fun CardProgressBar(
 ) {
     Box(
         modifier = modifier
-            .height(4.dp)
-            .background(
-                Brush.verticalGradient(
-                    listOf(TorfilxColors.Transparent, TorfilxColors.ScrimSoft),
-                ),
-            ),
+            .height(3.dp)
+            .background(TorfilxColors.ProgressTrack),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth(fraction.coerceIn(0f, 1f))
-                .height(4.dp)
+                .height(3.dp)
                 .background(TorfilxColors.ProgressFill),
         )
     }
@@ -228,40 +254,23 @@ private fun WatchedBadge(modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .size(22.dp)
-            .clip(RoundedCornerShape(11.dp))
-            .background(TorfilxColors.ScrimStrong),
+            .background(TorfilxColors.ScrimStrong, TorfilxShapes.Control),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             text = "✓",
-            style = MaterialTheme.typography.labelMedium,
-            color = TorfilxColors.TextPrimary,
-        )
-    }
-}
-
-/** "SERIES", in the corner of a show's poster. Text rather than an icon, so VoiceView needs nothing extra. */
-@Composable
-fun SeriesBadge(modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(4.dp))
-            .background(TorfilxColors.ScrimStrong)
-            .padding(horizontal = 6.dp, vertical = 2.dp),
-    ) {
-        Text(
-            text = "SERIES",
-            style = MaterialTheme.typography.labelMedium,
+            style = TorfilxType.Small,
             color = TorfilxColors.TextPrimary,
         )
     }
 }
 
 /**
- * Secondary line under a focused card: what is left to watch, or the title's year and length.
+ * The caption's second line: what is left to watch, or the title's year and length.
  *
  * An episode card leads with the episode — `S1 E3 · 12m left` — because the title above it is the
- * show's. A show's poster gives its seasons in place of a runtime.
+ * show's. A show's poster gives its seasons in place of a runtime, or says it is a series when the
+ * catalogue counted no episodes, since a show's poster looks exactly like a film's.
  */
 internal fun MediaCard.subtitle(): String {
     val parts = buildList<String> {
@@ -276,7 +285,10 @@ internal fun MediaCard.subtitle(): String {
             isEmpty() -> {
                 item.year?.let { add(it.toString()) }
                 val length = if (item.isShow) Format.showLength(item) else Format.runtime(item.runtimeMs)
-                length.takeIf { it.isNotEmpty() }?.let { add(it) }
+                when {
+                    length.isNotEmpty() -> add(length)
+                    item.isShow -> add("Series")
+                }
             }
         }
     }

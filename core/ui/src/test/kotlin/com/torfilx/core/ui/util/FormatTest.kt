@@ -86,4 +86,17 @@ class FormatTest {
         assertThat(Format.percentComplete(300, 100)).isEqualTo(100)
         assertThat(Format.percentComplete(10, 0)).isEqualTo(0)
     }
+
+    @Test
+    fun `sections are numbered in roman numerals, posters in two digits`() {
+        assertThat((1..5).map(Format::sectionNumeral)).containsExactly("i.", "ii.", "iii.", "iv.", "v.").inOrder()
+        assertThat(Format.sectionNumeral(9)).isEqualTo("ix.")
+        assertThat(Format.sectionNumeral(14)).isEqualTo("xiv.")
+        assertThat(Format.sectionNumeral(39)).isEqualTo("xxxix.")
+        assertThat(Format.sectionNumeral(40)).isEqualTo("40.")
+        assertThat(Format.sectionNumeral(0)).isEqualTo("0.")
+        assertThat(Format.rank(1)).isEqualTo("01")
+        assertThat(Format.rank(12)).isEqualTo("12")
+        assertThat(Format.rank(100)).isEqualTo("100")
+    }
 }

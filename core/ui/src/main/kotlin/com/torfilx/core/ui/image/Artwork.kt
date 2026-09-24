@@ -1,6 +1,7 @@
 package com.torfilx.core.ui.image
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -20,7 +21,6 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
 import coil3.request.ImageRequest
@@ -28,7 +28,7 @@ import coil3.request.crossfade
 import coil3.size.Precision
 import coil3.size.Scale
 import com.torfilx.core.ui.theme.TorfilxColors
-import kotlin.math.absoluteValue
+import com.torfilx.core.ui.theme.TorfilxType
 
 private const val CROSSFADE_MS = 150
 private const val DEMO_SCHEME = "demo://"
@@ -121,20 +121,28 @@ private fun sizedUrl(url: String, widthDp: Dp?, heightDp: Dp?, density: Float): 
     return "$url${separator}w=$bucket"
 }
 
+/**
+ * A title with no artwork, set like a plain book cover: the title in italics on a deep, warm field,
+ * inside a hairline border. The field's tone comes from the item id, so the same title always looks
+ * the same.
+ */
 @Composable
 private fun GeneratedArtwork(title: String, seed: String, modifier: Modifier) {
-    val colors = remember(seed) { gradientFor(seed) }
+    val brush = remember(seed) { Brush.verticalGradient(gradientFor(seed)) }
     Box(
-        modifier = modifier.background(Brush.linearGradient(colors)),
+        modifier = modifier
+            .background(brush)
+            .padding(8.dp)
+            .border(1.dp, TorfilxColors.Rule),
         contentAlignment = Alignment.Center,
     ) {
         if (title.isNotEmpty()) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.titleMedium,
+                style = TorfilxType.CardTitle,
                 color = TorfilxColors.TextPrimary,
                 textAlign = TextAlign.Center,
-                maxLines = 3,
+                maxLines = 4,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(horizontal = 12.dp),
             )
@@ -142,17 +150,19 @@ private fun GeneratedArtwork(title: String, seed: String, modifier: Modifier) {
     }
 }
 
+/** Deep, warm fields that sit with the ivory type: oxblood, forest, ink blue, umber, plum, slate. */
+private val COVER_FIELDS = listOf(
+    Color(0xFF3A1D1B) to Color(0xFF1C1110),
+    Color(0xFF1E2D22) to Color(0xFF111812),
+    Color(0xFF1C2433) to Color(0xFF10141B),
+    Color(0xFF33291C) to Color(0xFF1A1510),
+    Color(0xFF2E1F2C) to Color(0xFF171016),
+    Color(0xFF262A2B) to Color(0xFF141617),
+)
+
 /** Deterministic two-stop gradient: the same item always gets the same artwork. */
 private fun gradientFor(seed: String): List<Color> {
-    val hash = seed.hashCode().absoluteValue
-    val palette = listOf(
-        Color(0xFF2B2140) to Color(0xFF161320),
-        Color(0xFF13303A) to Color(0xFF10181C),
-        Color(0xFF3A2118) to Color(0xFF1C1210),
-        Color(0xFF1B3326) to Color(0xFF101A14),
-        Color(0xFF33203A) to Color(0xFF17101A),
-        Color(0xFF25303F) to Color(0xFF12171E),
-    )
-    val (start, end) = palette[hash % palette.size]
+    // mod, not abs: the absolute value of Int.MIN_VALUE is still negative.
+    val (start, end) = COVER_FIELDS[seed.hashCode().mod(COVER_FIELDS.size)]
     return listOf(start, end)
 }

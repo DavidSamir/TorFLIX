@@ -3,12 +3,12 @@ package com.torfilx.feature.library
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -24,11 +24,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.torfilx.core.model.LibrarySort
 import com.torfilx.core.model.MediaCard
 import com.torfilx.core.model.WatchedFilter
+import com.torfilx.core.ui.component.CapsText
 import com.torfilx.core.ui.component.EmptyState
 import com.torfilx.core.ui.component.PosterCard
 import com.torfilx.core.ui.component.SkeletonRow
@@ -36,6 +36,7 @@ import com.torfilx.core.ui.component.TvChip
 import com.torfilx.core.ui.focus.keepNeighbourRowComposed
 import com.torfilx.core.ui.theme.LocalTorfilxDimens
 import com.torfilx.core.ui.theme.TorfilxColors
+import com.torfilx.core.ui.theme.TorfilxType
 
 /**
  * Browse grid for Movies, Shows and My List.
@@ -66,7 +67,7 @@ fun LibraryScreen(
         state.errorMessage?.let { message ->
             Text(
                 text = message,
-                style = MaterialTheme.typography.labelLarge,
+                style = TorfilxType.Caption,
                 color = TorfilxColors.Warning,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -118,11 +119,12 @@ fun LibraryScreen(
                 contentPadding = PaddingValues(
                     start = dimens.overscanHorizontal,
                     end = dimens.overscanHorizontal,
-                    top = 12.dp,
+                    // Room for a focused poster in the first row to rise, with its frame.
+                    top = dimens.focusLift + dimens.focusFrameGap + dimens.focusFrame + 6.dp,
                     bottom = dimens.overscanVertical * 2,
                 ),
                 horizontalArrangement = Arrangement.spacedBy(dimens.cardSpacing),
-                verticalArrangement = Arrangement.spacedBy(dimens.cardSpacing + 16.dp),
+                verticalArrangement = Arrangement.spacedBy(dimens.rowSpacing - 12.dp),
             ) {
                 items(
                     count = state.cards.size,
@@ -134,13 +136,17 @@ fun LibraryScreen(
                         card = card,
                         onClick = { onOpenDetails(card.item.id) },
                         onLongClick = { viewModel.toggleMyList(card) },
-                        modifier = Modifier.keepNeighbourRowComposed(
-                            index = index,
-                            itemCount = state.cards.size,
-                            state = gridState,
-                            scope = scope,
-                            columns = GRID_COLUMNS,
-                        ),
+                        modifier = Modifier
+                            // A cell is a little wider than a poster: centre it, so the gaps are even.
+                            .fillMaxWidth()
+                            .wrapContentWidth()
+                            .keepNeighbourRowComposed(
+                                index = index,
+                                itemCount = state.cards.size,
+                                state = gridState,
+                                scope = scope,
+                                columns = GRID_COLUMNS,
+                            ),
                     )
                 }
             }
@@ -167,9 +173,9 @@ private fun FilterBar(
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(top = 8.dp)
+            .padding(top = 14.dp)
             .focusGroup(),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         // The total and the build are on screen on purpose, and together.
         //
@@ -181,22 +187,23 @@ private fun FilterBar(
         // debug variant installs under its own id, so having two builds side by side is easy. Now that
         // the catalogue updates on its own, its release number is on the same line for the same reason.
         if (!state.isLoading) {
-            Text(
+            CapsText(
                 text = buildString {
                     val noun = if (state.mode == LibraryMode.SHOWS) "show" else "title"
                     append(if (state.cards.size == 1) "1 $noun" else "${state.cards.size} ${noun}s")
                     if (appVersion.isNotEmpty()) append(" · v").append(appVersion)
                     if (state.catalogueVersion > 0) append(" · catalogue ").append(state.catalogueVersion)
                 },
-                style = MaterialTheme.typography.labelMedium,
-                color = TorfilxColors.TextSecondary,
-                modifier = Modifier.padding(horizontal = dimens.overscanHorizontal),
+                style = TorfilxType.MetaCaps,
+                color = TorfilxColors.TextTertiary,
+                modifier = Modifier.padding(horizontal = dimens.overscanHorizontal).padding(bottom = 4.dp),
             )
         }
 
         LazyRow(
-            contentPadding = PaddingValues(horizontal = dimens.overscanHorizontal),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            // The chips carry their own side padding; this lines their text up with the page edge.
+            contentPadding = PaddingValues(horizontal = dimens.overscanHorizontal - 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             modifier = Modifier.focusRestorer(),
         ) {
             items(LibrarySort.entries.toList(), key = { it.name }) { sort ->
@@ -217,8 +224,8 @@ private fun FilterBar(
 
         if (state.genres.isNotEmpty()) {
             LazyRow(
-                contentPadding = PaddingValues(horizontal = dimens.overscanHorizontal),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(horizontal = dimens.overscanHorizontal - 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.focusRestorer(),
             ) {
                 item(key = "genre-all") {
@@ -240,7 +247,8 @@ private fun FilterBar(
     }
 }
 
-private const val GRID_COLUMNS = 6
+/** Five 140 dp posters, with their gaps, fill the 864 dp between the overscan insets. */
+private const val GRID_COLUMNS = 5
 
 
 private fun LibrarySort.label(): String = when (this) {

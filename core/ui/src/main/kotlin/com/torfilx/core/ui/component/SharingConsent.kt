@@ -8,15 +8,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.unit.dp
-import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
+import com.torfilx.core.ui.theme.LocalTorfilxDimens
 import com.torfilx.core.ui.theme.TorfilxColors
+import com.torfilx.core.ui.theme.TorfilxType
 
 /**
  * The sharing (seeding) consent gate.
@@ -45,35 +44,34 @@ fun SharingConsentDialog(
         Column(
             modifier = Modifier
                 .width(760.dp)
-                .clip(RoundedCornerShape(12.dp))
-                .background(TorfilxColors.Surface)
-                .padding(32.dp),
+                .panel(LocalTorfilxDimens.current.hairline),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
+            Kicker(text = "Before you watch")
             Text(
                 text = title,
-                style = MaterialTheme.typography.headlineMedium,
+                style = TorfilxType.Headline,
                 color = TorfilxColors.TextPrimary,
             )
             Text(
                 text = "Streaming a title over BitTorrent also uploads it to other people, and your " +
                     "home IP address is visible to everyone else sharing that title. Only share what " +
                     "you have the right to redistribute.",
-                style = MaterialTheme.typography.bodyMedium,
+                style = TorfilxType.Reading,
                 color = TorfilxColors.TextSecondary,
             )
             Text(
                 text = storageSummary,
-                style = MaterialTheme.typography.bodyMedium,
+                style = TorfilxType.Reading,
                 color = TorfilxColors.TextSecondary,
             )
             Text(
                 // The app is torrent-only: there is no other source to fall back on.
                 text = "Every title here plays over BitTorrent, so sharing is needed to watch anything.",
-                style = MaterialTheme.typography.labelLarge,
+                style = TorfilxType.Caption,
                 color = TorfilxColors.TextTertiary,
             )
-            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp), modifier = Modifier.padding(top = 8.dp)) {
                 TvButton(text = acceptLabel, onClick = onAccept, autoFocus = true)
                 TvButton(text = declineLabel, onClick = onDecline, primary = false)
             }

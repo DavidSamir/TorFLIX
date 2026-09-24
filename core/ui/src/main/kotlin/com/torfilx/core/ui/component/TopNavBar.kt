@@ -1,38 +1,22 @@
 package com.torfilx.core.ui.component
 
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.focusGroup
-import androidx.compose.foundation.focusable
-import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.IntrinsicSize
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.torfilx.core.ui.theme.LocalTorfilxDimens
 import com.torfilx.core.ui.theme.TorfilxColors
+import com.torfilx.core.ui.theme.TorfilxType
+import com.torfilx.core.ui.theme.ruleBelow
 
 /** A destination in the top navigation bar. */
 data class TopNavItem(
@@ -40,11 +24,14 @@ data class TopNavItem(
     val label: String,
 )
 
+private val MASTHEAD_HEIGHT = 60.dp
+
 /**
- * Top tab bar.
+ * The masthead: the italic wordmark, the sections in spaced capitals, and a hairline rule beneath.
  *
- * Selection follows focus only on OK, not on focus: moving across the tabs must not tear down the
- * screen below and destroy the row you were about to come back to (plan.md §5.2 rule 6).
+ * The current section is set in ivory; the focused one also draws an underline, so the two are never
+ * confused. Selection follows OK, not focus: moving across the tabs must not tear down the screen
+ * below and destroy the row you were about to come back to (plan.md §5.2 rule 6).
  */
 @Composable
 fun TopNavBar(
@@ -58,75 +45,28 @@ fun TopNavBar(
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .height(56.dp)
+            .height(MASTHEAD_HEIGHT)
             .background(TorfilxColors.Background)
             .padding(horizontal = dimens.overscanHorizontal)
+            .ruleBelow(dimens.hairline)
             .focusGroup(),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Text(
-            text = "TORFILX",
-            style = MaterialTheme.typography.titleLarge,
-            color = TorfilxColors.Accent,
-            modifier = Modifier.padding(end = 24.dp),
+            text = "Torfilx",
+            style = TorfilxType.Masthead,
+            color = TorfilxColors.TextPrimary,
+            modifier = Modifier.padding(end = 36.dp),
         )
         items.forEach { item ->
-            NavTab(
-                item = item,
+            TvChip(
+                text = item.label,
                 selected = item.id == selectedId,
                 onClick = { onSelect(item) },
             )
         }
         Box(Modifier.weight(1f))
         trailing?.invoke()
-    }
-}
-
-@Composable
-private fun NavTab(
-    item: TopNavItem,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    val interactionSource = remember { MutableInteractionSource() }
-    val isFocused by interactionSource.collectIsFocusedAsState()
-    val underlineAlpha by animateFloatAsState(
-        targetValue = if (selected || isFocused) 1f else 0f,
-        animationSpec = tween(160),
-        label = "tabUnderline",
-    )
-
-    // The column is sized to the full single-line label (IntrinsicSize.Max); without it the underline
-    // would expand the tab to the whole bar and push the other tabs off screen.
-    Column(
-        modifier = Modifier
-            .width(IntrinsicSize.Max)
-            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 8.dp)
-            .semantics {
-                role = Role.Tab
-                this.selected = selected
-                contentDescription = item.label
-            },
-        horizontalAlignment = Alignment.CenterHorizontally,
-    ) {
-        Text(
-            text = item.label,
-            style = MaterialTheme.typography.titleMedium,
-            maxLines = 1,
-            color = when {
-                isFocused || selected -> TorfilxColors.TextPrimary
-                else -> TorfilxColors.TextSecondary
-            },
-        )
-        Box(
-            modifier = Modifier
-                .padding(top = 4.dp)
-                .fillMaxWidth()
-                .height(3.dp)
-                .alpha(underlineAlpha)
-                .background(if (isFocused) TorfilxColors.Focus else TorfilxColors.Accent),
-        )
     }
 }

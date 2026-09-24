@@ -55,6 +55,7 @@ import com.torfilx.core.player.EndCard
 import com.torfilx.core.player.PlaybackError
 import com.torfilx.core.player.PlayerUiState
 import com.torfilx.core.player.StreamStats
+import com.torfilx.core.ui.component.CapsText
 import com.torfilx.core.ui.component.ErrorState
 import com.torfilx.core.ui.component.NextEpisodeCard
 import com.torfilx.core.ui.component.SharingConsentDialog
@@ -63,6 +64,7 @@ import com.torfilx.core.ui.component.TvChip
 import com.torfilx.core.ui.focus.RemoteKeys
 import com.torfilx.core.ui.focus.onRemoteKey
 import com.torfilx.core.ui.theme.TorfilxColors
+import com.torfilx.core.ui.theme.TorfilxType
 import com.torfilx.core.ui.util.Format
 import kotlinx.coroutines.delay
 
@@ -796,11 +798,11 @@ private fun TrackPickers(
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         if (state.audioTracks.size > 1) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
+                CapsText(
                     text = "Audio",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = TorfilxColors.TextSecondary,
-                    modifier = Modifier.padding(top = 8.dp),
+                    style = TorfilxType.MetaCaps,
+                    color = TorfilxColors.TextTertiary,
+                    modifier = Modifier.padding(top = 9.dp, end = 4.dp),
                 )
                 state.audioTracks.forEach { track ->
                     TvChip(
@@ -813,11 +815,11 @@ private fun TrackPickers(
         }
         if (state.subtitleTracks.isNotEmpty()) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
+                CapsText(
                     text = "Subtitles",
-                    style = MaterialTheme.typography.labelLarge,
-                    color = TorfilxColors.TextSecondary,
-                    modifier = Modifier.padding(top = 8.dp),
+                    style = TorfilxType.MetaCaps,
+                    color = TorfilxColors.TextTertiary,
+                    modifier = Modifier.padding(top = 9.dp, end = 4.dp),
                 )
                 TvChip(
                     text = "Off",
@@ -879,7 +881,7 @@ private fun ScrubBar(
             Modifier
                 .fillMaxWidth(bufferedFraction)
                 .fillMaxHeight()
-                .background(TorfilxColors.SurfaceHighest),
+                .background(TorfilxColors.TextTertiary),
         )
         Box(
             Modifier

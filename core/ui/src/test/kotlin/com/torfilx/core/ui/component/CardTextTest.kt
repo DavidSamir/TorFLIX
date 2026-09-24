@@ -29,6 +29,12 @@ class CardTextTest {
     }
 
     @Test
+    fun `a show with no episodes counted still says it is a series`() {
+        assertThat(MediaCard(show.copy(seasonCount = 0, episodeCount = 0)).subtitle()).isEqualTo("1959 · Series")
+        assertThat(MediaCard(film.copy(runtimeMs = null)).subtitle()).isEqualTo("1921")
+    }
+
+    @Test
     fun `an episode card leads with the episode, then what is left or its name`() {
         val progress = PlaybackProgress(episode.id, 13 * minute, 25 * minute)
         assertThat(MediaCard(show, episode = episode, progress = progress).subtitle()).isEqualTo("S1 E3 · 12m left")
