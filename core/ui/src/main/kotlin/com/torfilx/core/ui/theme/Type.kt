@@ -3,6 +3,7 @@ package com.torfilx.core.ui.theme
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontLoadingStrategy
 import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.em
@@ -19,19 +20,27 @@ import com.torfilx.core.ui.R
  * font. About 280 KB in all.
  */
 object TorfilxFonts {
+    /**
+     * A face that fails to load falls back to the system font instead of throwing. On Android 5 to 7 the
+     * font is copied into the cache directory to be loaded, and with the storage full that copy fails:
+     * the default, blocking strategy then threw at the first line of text, on every launch, until
+     * something freed space. Reading the text in another face is better than not opening at all.
+     */
+    private val LOCAL = FontLoadingStrategy.OptionalLocal
+
     /** Fraunces Light at its largest optical size: hairline contrast that only works big. Titles. */
-    val Display = FontFamily(Font(R.font.fraunces_display, FontWeight.Light))
+    val Display = FontFamily(Font(R.font.fraunces_display, FontWeight.Light, loadingStrategy = LOCAL))
 
     /** Fraunces at reading sizes: roman for reading text and headings, light italic for decks and captions. */
     val Serif = FontFamily(
-        Font(R.font.fraunces_regular, FontWeight.Normal),
-        Font(R.font.fraunces_light_italic, FontWeight.Light, FontStyle.Italic),
+        Font(R.font.fraunces_regular, FontWeight.Normal, loadingStrategy = LOCAL),
+        Font(R.font.fraunces_light_italic, FontWeight.Light, FontStyle.Italic, loadingStrategy = LOCAL),
     )
 
     /** Inter: labels, navigation, metadata and small print. */
     val Sans = FontFamily(
-        Font(R.font.inter_regular, FontWeight.Normal),
-        Font(R.font.inter_semibold, FontWeight.SemiBold),
+        Font(R.font.inter_regular, FontWeight.Normal, loadingStrategy = LOCAL),
+        Font(R.font.inter_semibold, FontWeight.SemiBold, loadingStrategy = LOCAL),
     )
 }
 
