@@ -12,7 +12,9 @@ import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketException
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import kotlin.concurrent.thread
 import kotlin.math.min
 
@@ -305,7 +307,6 @@ internal class TorrentStreamServer(
 ) {
 
     private val streams = ConcurrentHashMap<String, StreamSource>()
-    private val executor = Executors.newCachedThreadPool()
 
     @Volatile
     private var serverSocket: ServerSocket? = null
@@ -314,20 +315,27 @@ internal class TorrentStreamServer(
     var port: Int = 0
         private set
 
+    /**
+     * A server is started and stopped many times in one process: the engine stops it when the viewer
+     * exits with Back or clears the downloaded data, and Android usually keeps the process for the next
+     * launch. A shut-down executor never runs anything again, so each start gets its own; one kept
+     * across a stop made the first request after a restart throw on the accept thread and crash the app.
+     */
     fun start() {
         if (serverSocket != null) return
         val socket = ServerSocket(0, BACKLOG, InetAddress.getByName("127.0.0.1"))
+        val executor = Executors.newCachedThreadPool()
         serverSocket = socket
         port = socket.localPort
-        thread(name = "torfilx-torrent-http", isDaemon = true) { acceptLoop(socket) }
+        thread(name = "torfilx-torrent-http", isDaemon = true) { acceptLoop(socket, executor) }
         TorfilxLog.i(TAG, "Loopback stream server on 127.0.0.1:$port")
     }
 
+    /** Closing the socket ends the accept loop, which then shuts its executor down. */
     fun stop() {
         runCatching { serverSocket?.close() }
         serverSocket = null
         streams.clear()
-        executor.shutdownNow()
     }
 
     fun register(streamed: StreamSource) {
@@ -338,17 +346,27 @@ internal class TorrentStreamServer(
         streams.remove(infoHash)
     }
 
-    private fun acceptLoop(socket: ServerSocket) {
-        while (!socket.isClosed) {
-            val client = try {
-                socket.accept()
-            } catch (closed: SocketException) {
-                return
-            } catch (error: IOException) {
-                TorfilxLog.w(TAG, "Accept failed", error)
-                continue
+    private fun acceptLoop(socket: ServerSocket, executor: ExecutorService) {
+        try {
+            while (!socket.isClosed) {
+                val client = try {
+                    socket.accept()
+                } catch (closed: SocketException) {
+                    return
+                } catch (error: IOException) {
+                    TorfilxLog.w(TAG, "Accept failed", error)
+                    continue
+                }
+                try {
+                    executor.execute { runCatching { handle(client) }.onFailure { logClientFailure(it) } }
+                } catch (rejected: RejectedExecutionException) {
+                    runCatching { client.close() }
+                    return
+                }
             }
-            executor.execute { runCatching { handle(client) }.onFailure { logClientFailure(it) } }
+        } finally {
+            // Interrupts the handlers still serving, which unblocks any waiting for a piece.
+            executor.shutdownNow()
         }
     }
 

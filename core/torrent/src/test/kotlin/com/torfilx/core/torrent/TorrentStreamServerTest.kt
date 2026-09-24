@@ -116,6 +116,26 @@ class TorrentStreamServerTest {
     }
 
     @Test
+    fun `a server stopped and started again serves requests`() {
+        // Exiting with Back stops the engine, and so this server, but Android usually keeps the process:
+        // the next launch starts the same instance again. Its request pool used to be shut down for good
+        // by the first stop, so the first request after a restart threw on the accept thread — an
+        // uncaught exception that took the whole app down the moment the viewer pressed Play.
+        server.stop()
+        server.start()
+        register()
+
+        val connection = open()
+        assertThat(connection.responseCode).isEqualTo(200)
+        assertThat(connection.readExactly(payload.size)).isEqualTo(payload)
+
+        server.stop()
+        server.start()
+        register()
+        assertThat(open().readExactly(payload.size)).isEqualTo(payload)
+    }
+
+    @Test
     fun `a whole-file request returns the whole file`() {
         register()
         val connection = open()
