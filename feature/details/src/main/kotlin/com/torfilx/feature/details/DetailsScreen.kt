@@ -5,6 +5,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -484,8 +485,13 @@ private fun Spread(
                 )
             }
             notice()
-            Row(
+            // Wraps: a film carries a link per quality, and "Resume 1080p" three or four times over is
+            // wider than this column. In a row that cannot wrap, the last links were squeezed to a
+            // clipped word or to nothing at all — still focusable, so the D-pad landed on something
+            // the viewer could not see.
+            FlowRow(
                 horizontalArrangement = Arrangement.spacedBy(36.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
                 modifier = Modifier.padding(top = 4.dp),
                 content = primaryActions,
             )

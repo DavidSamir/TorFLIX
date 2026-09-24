@@ -158,7 +158,13 @@ fun SearchScreen(
     }
 }
 
-/** Earlier searches, as a short numbered list of links. */
+/**
+ * Earlier searches, as a short numbered list of links.
+ *
+ * Only as many as the pane beside the keyboard holds. A plain column does not scroll: with the full
+ * history, the last entries and "Clear history" were laid out below the pane's edge at no height, and
+ * still took focus, so Down moved focus onto something that could not be seen.
+ */
 @Composable
 private fun RecentSearches(
     recent: List<String>,
@@ -172,7 +178,7 @@ private fun RecentSearches(
             inset = 0.dp,
             modifier = Modifier.padding(bottom = 12.dp),
         )
-        recent.forEach { entry ->
+        recent.take(RECENT_SHOWN).forEach { entry ->
             TvTextLink(text = entry, onClick = { onPick(entry) }, arrow = true)
         }
         TvTextLink(text = "Clear history", onClick = onClear, modifier = Modifier.padding(top = 12.dp))
@@ -207,3 +213,6 @@ private val KEYBOARD_COLUMN_WIDTH = 330.dp
 
 /** Three 140 dp posters, with their gaps, fill what the keyboard leaves. */
 private const val RESULT_COLUMNS = 3
+
+/** Recent searches that fit the pane with "Clear history" below them (about 45 dp each of ~400 dp). */
+private const val RECENT_SHOWN = 5
