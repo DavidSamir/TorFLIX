@@ -14,6 +14,7 @@ import com.torfilx.core.catalogue.release.CatalogueReleaseWriter
 import com.torfilx.core.catalogue.swarm.CatalogueTorrents
 import com.torfilx.core.catalogue.swarm.LibtorrentNative
 import com.torfilx.core.model.MagnetLink
+import com.torfilx.tools.catalog.merge.TextDecoding
 import kotlinx.serialization.builtins.ListSerializer
 import org.libtorrent4j.Ed25519
 import java.io.File
@@ -283,9 +284,14 @@ object CatalogPinning {
 /** The publisher's private seed: 32 bytes as hex, readable by its owner only. */
 object SeedFiles {
 
+    /**
+     * Reads the seed in whichever encoding the file was saved: Windows PowerShell 5.1 writes UTF-16 with
+     * a byte order mark by default, and Notepad may add a UTF-8 one.
+     */
     fun read(file: File): ByteArray {
         require(file.isFile) { "No seed file at ${file.path}" }
-        val seed = Hex.decodeOrNull(file.readText())
+        val text = runCatching { TextDecoding.decode(file.readBytes()) }.getOrDefault("")
+        val seed = Hex.decodeOrNull(text)
         require(seed != null && seed.size == Ed25519Keys.SEED_BYTES) {
             "${file.path} is not a publisher seed (expected ${Ed25519Keys.SEED_BYTES * 2} hex characters)"
         }

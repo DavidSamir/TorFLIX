@@ -1,5 +1,6 @@
 package com.torfilx.tools.catalog
 
+import com.torfilx.tools.catalog.merge.MergeCommand
 import java.io.File
 import java.io.PrintStream
 import java.net.InetSocketAddress
@@ -42,6 +43,7 @@ class CatalogPublisherCli(
                 "keygen" -> offline.keygen(args, workingDir)
                 "pubkey" -> offline.pubkey(args)
                 "pin" -> offline.pin(args)
+                "merge" -> MergeCommand(out, clock, ::resolve).run(args)
                 "build" -> offline.build(args)
                 "verify" -> offline.verify(args)
                 "publish" -> network.publish(args)
@@ -88,6 +90,14 @@ class CatalogPublisherCli(
             |  pubkey   --seed <seed file>
             |  pin      --catalog <catalog.json> [--out <file>]
             |           Gives every title and every episode a permanent id (the id the app already derives), in place.
+            |  merge    --add <folder> --out <catalog.json> [--remove <folder>] [--releases <folder>]...
+            |           [--order mtime|name] [--version <n>] [--min-version-code <n>] [--app-version-code <n>]
+            |           [--merge-episodes] [--strip-trackers] [--strict] [--allow-vanished]
+            |           [--max-vanished-percent <p>] [--report <file>] [--summary <file>]
+            |           Merges every catalogue file in the add folder, newest first (the newest copy of each
+            |           title wins), takes out what the remove folder lists, pins ids and checks the result
+            |           exactly as build will. Settles the release number and oldest app build from the
+            |           releases already built, and refuses when titles of the last release would vanish.
             |  build    --catalog <catalog.json> --version <n> --seed <seed file> --out <dir>
             |           [--asset-dir <dir>] [--min-version-code <n>] [--published-at <epoch ms>]
             |           [--tracker <url>]... [--no-default-trackers] [--strip-trackers]
@@ -152,7 +162,10 @@ class Args private constructor(
 
     companion object {
         /** Options that take no value. */
-        private val FLAGS = setOf("force", "private", "no-default-trackers", "allow-inside-repo", "help", "strip-trackers")
+        private val FLAGS = setOf(
+            "force", "private", "no-default-trackers", "allow-inside-repo", "help", "strip-trackers",
+            "strict", "merge-episodes", "allow-vanished",
+        )
 
         fun parse(argv: List<String>): Args {
             val command = argv.firstOrNull()?.takeIf { !it.startsWith("--") }

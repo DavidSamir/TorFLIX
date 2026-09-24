@@ -24,6 +24,12 @@ replay_pid*.log
 dist/catalogue/
 scripts/publish-catalog/.release/
 scripts/publish-catalog/catalog.json
+# The folders publish-catalog merges, what it writes, and its lock.
+scripts/publish-catalog/add/
+scripts/publish-catalog/remove/
+scripts/publish-catalog/output/
+scripts/publish-catalog/published/
+scripts/publish-catalog/.publish.lock/
 
 # Temporary test files
 temp-fetch/

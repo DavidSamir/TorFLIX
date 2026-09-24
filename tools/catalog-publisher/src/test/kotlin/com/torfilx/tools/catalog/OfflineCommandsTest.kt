@@ -100,6 +100,18 @@ class OfflineCommandsTest {
     }
 
     @Test
+    fun `a seed saved as UTF-16, as Windows PowerShell does, or with a UTF-8 byte order mark still reads`() {
+        val hex = Hex.encode(CatalogueTestKeys.SEED)
+        val utf16 = File(tmp.root, "utf16.seed").apply {
+            writeBytes(byteArrayOf(0xFF.toByte(), 0xFE.toByte()) + "$hex\r\n".toByteArray(Charsets.UTF_16LE))
+        }
+        val bom = File(tmp.root, "bom.seed").apply { writeBytes(byteArrayOf(0xEF.toByte(), 0xBB.toByte(), 0xBF.toByte()) + hex.toByteArray()) }
+
+        assertThat(SeedFiles.read(utf16)).isEqualTo(CatalogueTestKeys.SEED)
+        assertThat(SeedFiles.read(bom)).isEqualTo(CatalogueTestKeys.SEED)
+    }
+
+    @Test
     fun `keygen refuses to put the seed inside a repository`() {
         File(workingDir, ".git").mkdirs()
         val insideRepo = File(workingDir, "keys/publisher.seed")

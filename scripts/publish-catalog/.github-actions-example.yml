@@ -1,39 +1,34 @@
-# GitHub Actions workflow example for publishing catalogues with the CI/CD script.
+# GitHub Actions workflow example for publishing the catalogue with publish-catalog.sh.
 #
 # To use this:
-# 1. Save your publisher seed file as a GitHub repository secret named PUBLISHER_SEED
-#    (Settings → Secrets and variables → New repository secret)
-# 2. Place this file in .github/workflows/publish-catalogue.yml
-# 3. Customize as needed (trigger, version numbering, seed path, etc.)
+# 1. Save the publisher seed as a repository secret named PUBLISHER_SEED
+#    (Settings → Secrets and variables → Actions → New repository secret).
+# 2. Save this file as .github/workflows/publish-catalogue.yml.
+# 3. Provide the add/ and remove/ folders: they are not in the repository (it is public). The step
+#    below downloads them from a private location; replace it with whatever you use.
 #
-# The workflow will:
-# - Trigger manually (workflow_dispatch) or on tag push
-# - Write the seed from the secret to a temp file
-# - Run the publish-catalog script with the catalogue from scripts/publish-catalog/catalog.json
-# - The catalogue version can be set from the tag or run number
+# A checkout gives every file the same modification time, so files are ranked by name (--order name):
+# name them so they sort by age, e.g. 2026-09-24-new-films.json. A runner has no earlier releases
+# either, so the version must be given, and it must be higher than the last release published:
+# televisions ignore any release that is not newer than the one they have.
 
 name: Publish Catalogue
 
 on:
-  # Trigger manually from Actions tab
   workflow_dispatch:
     inputs:
       version:
-        description: 'Catalogue version (empty = use run number)'
-        required: false
+        description: 'Release number, higher than the last one published'
+        required: true
       hours:
-        description: 'Hours to seed (default 24)'
+        description: 'Hours to publish; hosted runners stop a job after 6 hours'
         required: false
-        default: '24'
-
-  # Or trigger on tag push (e.g., catalog-v1, catalog-v2, ...)
-  # push:
-  #   tags:
-  #     - 'catalog-*'
+        default: '5.5'
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    timeout-minutes: 360
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -44,32 +39,34 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: Write seed file
+      - name: Fetch the catalogue folders
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.PUBLISHER_SEED }}" > ~/.ssh/torfilx-publisher.seed
-          chmod 600 ~/.ssh/torfilx-publisher.seed
+          # Replace with your own source of catalogue files, for example a private repository:
+          # git clone --depth 1 https://x-access-token:${{ secrets.CATALOGUE_TOKEN }}@github.com/<you>/<catalogue-repo> /tmp/catalogue
+          # cp -r /tmp/catalogue/add /tmp/catalogue/remove scripts/publish-catalog/
+          test -d scripts/publish-catalog/add || { echo "no add/ folder"; exit 1; }
 
-      - name: Determine version
-        id: version
+      - name: Write the seed
         run: |
-          if [ -z "${{ github.event.inputs.version }}" ]; then
-            VERSION="${{ github.run_number }}"
-          else
-            VERSION="${{ github.event.inputs.version }}"
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          umask 077
+          printf '%s\n' "${{ secrets.PUBLISHER_SEED }}" > "$RUNNER_TEMP/publisher.seed"
 
-      - name: Make script executable
-        run: chmod +x scripts/publish-catalog/publish-catalog.sh
-
-      - name: Publish catalogue
+      - name: Publish
         run: |
-          scripts/publish-catalog/publish-catalog.sh \
-            ~/.ssh/torfilx-publisher.seed \
-            --version ${{ steps.version.outputs.version }} \
-            --hours ${{ github.event.inputs.hours || '24' }}
+          bash scripts/publish-catalog/publish-catalog.sh "$RUNNER_TEMP/publisher.seed" \
+            --order name \
+            --strict \
+            --version "${{ github.event.inputs.version }}" \
+            --hours "${{ github.event.inputs.hours || '5.5' }}"
 
-      - name: Cleanup
+      - name: Keep the merge report
         if: always()
-        run: rm -f ~/.ssh/torfilx-publisher.seed
+        uses: actions/upload-artifact@v4
+        with:
+          name: merge-report
+          path: scripts/publish-catalog/output/merge-report.txt
+          if-no-files-found: ignore
+
+      - name: Remove the seed
+        if: always()
+        run: rm -f "$RUNNER_TEMP/publisher.seed"
