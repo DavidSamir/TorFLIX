@@ -388,27 +388,21 @@ class PlaybackController @Inject constructor(
         }
 
         val exoItem = buildMediaItem(stream?.url ?: source.url, info.subtitles, source.kind)
-        val handedOver = withContext(Dispatchers.Main) {
-            // The viewer may have left the player while the swarm was resolving. stop() runs on this
-            // thread, so nothing can come between this check and the hand-over.
-            if (epoch != openEpoch) return@withContext false
-            val exo = ensurePlayer()
-            // The player instance is reused between titles, and its speed with it. A new title starts at
-            // normal speed; the next episode keeps whatever the viewer chose.
-            exo.setPlaybackSpeed(if (carryOver) previous.playbackSpeed else 1f)
-            loadedPlayableId = request.playableId
-            exo.setMediaItem(exoItem, startPosition)
-            exo.prepare()
-            // Nothing plays for a screen nobody is looking at. A screen asking for a title is on screen
-            // by definition; this holds back the player's own re-opens — the next episode, a retry, an
-            // audio-recovery rebuild — when the app lost the screen while they were resolving. The
-            // viewer finds the title ready and paused when they come back.
-            exo.playWhenReady = autoplay.onScreen
-            true
+        var handedOver = false
+        try {
+            handedOver = handOver(exoItem, request, carryOver, previous, startPosition, epoch)
+        } finally {
+            // Not played — the viewer left, or this open was cancelled on the way — so its torrent stops
+            // streaming, or it would stay "streaming", and never evictable, for the rest of the session.
+            // Never the one the player holds now: a newer open of the same title may be playing it.
+            if (!handedOver) {
+                stream?.infoHash?.takeIf { it != activeTorrentInfoHash }?.let { unused ->
+                    scope.launch { runCatching { torrentCoordinator.stopStreaming(unused) } }
+                }
+            }
         }
         if (!handedOver) {
             TorfilxLog.i(TAG, "The player was stopped while ${request.playableId} was starting; not playing it")
-            stream?.let { unused -> scope.launch { runCatching { torrentCoordinator.stopStreaming(unused.infoHash) } } }
             return
         }
 
@@ -443,6 +437,33 @@ class PlaybackController @Inject constructor(
         )
         lastUserInputMs = System.currentTimeMillis()
         startPositionTicker()
+    }
+
+    /** Gives the resolved title to the player; false when the viewer left while it was resolving. */
+    private suspend fun handOver(
+        exoItem: ExoMediaItem,
+        request: PlaybackRequest,
+        carryOver: Boolean,
+        previous: PlayerUiState,
+        startPosition: Long,
+        epoch: Int,
+    ): Boolean = withContext(Dispatchers.Main) {
+        // The viewer may have left the player while the swarm was resolving. stop() runs on this
+        // thread, so nothing can come between this check and the hand-over.
+        if (epoch != openEpoch) return@withContext false
+        val exo = ensurePlayer()
+        // The player instance is reused between titles, and its speed with it. A new title starts at
+        // normal speed; the next episode keeps whatever the viewer chose.
+        exo.setPlaybackSpeed(if (carryOver) previous.playbackSpeed else 1f)
+        loadedPlayableId = request.playableId
+        exo.setMediaItem(exoItem, startPosition)
+        exo.prepare()
+        // Nothing plays for a screen nobody is looking at. A screen asking for a title is on screen
+        // by definition; this holds back the player's own re-opens — the next episode, a retry, an
+        // audio-recovery rebuild — when the app lost the screen while they were resolving. The
+        // viewer finds the title ready and paused when they come back.
+        exo.playWhenReady = autoplay.onScreen
+        true
     }
 
     /**
@@ -635,7 +656,21 @@ class PlaybackController @Inject constructor(
         // Loading from the first instant: the open may first wait for a fetch begun during the countdown,
         // and a last frame with no card and no spinner over it looks like a remote that stopped working.
         _state.update { it.copy(endCard = null, isLoading = true, error = null, loadingDetail = null) }
-        scope.launch { open(PlaybackRequest(playableId = playableId, startPositionMs = startPositionMs), carryOver = true) }
+        reopen(PlaybackRequest(playableId = playableId, startPositionMs = startPositionMs))
+    }
+
+    /**
+     * The player's own re-opens — the next episode, Retry, and the audio and decoder recoveries — run in
+     * the application scope, which leaving the player does not cancel. [stop] cancels this job instead.
+     * An open for a title the viewer has left used to run on to the end: it wrote its retry text and its
+     * error over whatever the viewer played next, and then released its torrent, which is the one the
+     * new open is playing when the viewer went back in and chose the same episode.
+     */
+    private var reopenJob: Job? = null
+
+    private fun reopen(request: PlaybackRequest) {
+        reopenJob?.cancel()
+        reopenJob = scope.launch { open(request, carryOver = true) }
     }
 
     /**
@@ -922,16 +957,13 @@ class PlaybackController @Inject constructor(
                 disableTunnelingForSession = true
                 TorfilxLog.w(TAG, "Still no audio; rebuilding the player without tunneling")
                 val info = resolved ?: return
-                scope.launch {
-                    open(
-                        PlaybackRequest(
-                            playableId = info.playableId,
-                            sourceId = info.sourceId,
-                            startPositionMs = _state.value.positionMs,
-                        ),
-                        carryOver = true,
-                    )
-                }
+                reopen(
+                    PlaybackRequest(
+                        playableId = info.playableId,
+                        sourceId = info.sourceId,
+                        startPositionMs = _state.value.positionMs,
+                    ),
+                )
             }
 
             AudioRemedy.REPORT -> {
@@ -1055,6 +1087,8 @@ class PlaybackController @Inject constructor(
         saveProgress(force = true)
         // Any open still resolving belongs to the title being left: it must not play when it arrives.
         openEpoch++
+        reopenJob?.cancel()
+        reopenJob = null
         loadedPlayableId = null
         // Leaving ends any autoplay chain: nothing counts down, nothing is held back, and the next
         // title starts a fresh count of unattended autoplays.
@@ -1163,30 +1197,24 @@ class PlaybackController @Inject constructor(
         ) {
             disableTunnelingForSession = true
             TorfilxLog.w(TAG, "Audio renderer failed with tunneling on; retrying without it")
-            scope.launch {
-                open(
-                    PlaybackRequest(
-                        playableId = info.playableId,
-                        sourceId = info.sourceId,
-                        startPositionMs = _state.value.positionMs,
-                    ),
-                    carryOver = true,
-                )
-            }
+            reopen(
+                PlaybackRequest(
+                    playableId = info.playableId,
+                    sourceId = info.sourceId,
+                    startPositionMs = _state.value.positionMs,
+                ),
+            )
             return
         }
 
         if (isDecoderProblem && info != null) {
             playbackInfoRepository.markSourceFailed(info.playableId, info.sourceId)
-            scope.launch {
-                open(
-                    PlaybackRequest(
-                        playableId = info.playableId,
-                        startPositionMs = _state.value.positionMs,
-                    ),
-                    carryOver = true,
-                )
-            }
+            reopen(
+                PlaybackRequest(
+                    playableId = info.playableId,
+                    startPositionMs = _state.value.positionMs,
+                ),
+            )
             return
         }
 
@@ -1230,15 +1258,12 @@ class PlaybackController @Inject constructor(
     fun retry() {
         val info = resolved ?: return
         _state.value = _state.value.copy(error = null, isLoading = true)
-        scope.launch {
-            open(
-                PlaybackRequest(
-                    playableId = info.playableId,
-                    startPositionMs = _state.value.positionMs,
-                ),
-                carryOver = true,
-            )
-        }
+        reopen(
+            PlaybackRequest(
+                playableId = info.playableId,
+                startPositionMs = _state.value.positionMs,
+            ),
+        )
     }
 
     fun onAudioFocusLostTransiently() {

@@ -112,6 +112,9 @@ class PlaybackControllerShowTest {
     /** When set, the next stream call waits on it: a swarm that is slow to answer. */
     private var swarm: CompletableDeferred<Unit>? = null
 
+    /** Magnets whose stream call was cancelled while it waited, as the engine sees an open given up. */
+    private val cancelledStreams = mutableListOf<String>()
+
     /** How many stream calls, from the next one, time out looking for peers. */
     private var timeouts = 0
     private val coordinator = mockk<TorrentCoordinator>(relaxed = true) {
@@ -121,7 +124,12 @@ class PlaybackControllerShowTest {
             streamed += Triple(magnet, secondArg(), thirdArg())
             swarm?.let { gate ->
                 swarm = null
-                gate.await()
+                try {
+                    gate.await()
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    cancelledStreams += magnet
+                    throw cancelled
+                }
             }
             if (timeouts > 0) {
                 timeouts--
@@ -418,11 +426,42 @@ class PlaybackControllerShowTest {
         // and saving them under the second marked it watched before it had played a frame.
         assertThat(progressDao.rows.value.map { it.itemId }).containsExactly(e1)
         assertThat(progressDao.rows.value.single().watched).isTrue()
-        // The player was never handed the second episode, and the torrent that arrived after the
-        // viewer left was let go.
+        // The player was never handed the second episode, and its open was called off rather than left
+        // to run on: the engine drops a torrent whose stream is cancelled before it is playing.
         assertThat(startPositions).hasSize(1)
         assertThat(c.state.value.episode).isNull()
-        coVerify { coordinator.stopStreaming(hashOf(episodes[1])) }
+        assertThat(cancelledStreams).containsExactly(episodes[1].magnets.single().magnet)
+    }
+
+    @Test
+    fun `an open the viewer left never releases the torrent a new open of the same episode plays`() = runTest(main.dispatcher) {
+        autoplay.value = false
+        val c = controller()
+        c.open(PlaybackRequest(e1))
+        endPlayback()
+
+        // "Play" on the card: the second episode's swarm is slow. The viewer backs out, and plays the same
+        // episode again from its show's page, which resolves at once.
+        val gate = CompletableDeferred<Unit>()
+        swarm = gate
+        c.playNext()
+        runCurrent()
+        c.stop(release = false)
+        c.open(PlaybackRequest(e2))
+        runCurrent()
+        assertThat(c.state.value.episode?.id).isEqualTo(e2)
+
+        // The first open's swarm answers now. It used to run on, find it had been left, and release its
+        // torrent — the one the new open is playing, which then served 404s and stopped the film — after
+        // writing "attempt 2 of 2" and its error over the playing episode.
+        gate.complete(Unit)
+        advanceTimeBy(5_000)
+        runCurrent()
+
+        coVerify(exactly = 0) { coordinator.stopStreaming(hashOf(episodes[1])) }
+        assertThat(c.state.value.episode?.id).isEqualTo(e2)
+        assertThat(c.state.value.error).isNull()
+        assertThat(c.state.value.loadingDetail).isNull()
     }
 
     @Test
