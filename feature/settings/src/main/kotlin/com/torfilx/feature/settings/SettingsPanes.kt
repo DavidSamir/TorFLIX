@@ -616,9 +616,13 @@ internal fun WatchDataPane(state: SettingsUiState, viewModel: SettingsViewModel,
         "Continue Watching and My List live only on this device. Back them up and copy the file off to " +
             "keep them across a reinstall or a new stick.",
     )
-    ActionRow(
+    // Confirmed, because it is the control focus lands on and it replaces the backup file: one stray OK
+    // after a reinstall, before restoring, would have overwritten the only copy with empty data.
+    ConfirmActionRow(
         label = "Back up watch data",
-        onClick = viewModel::backupUserData,
+        confirmLabel = "Press again to replace the backup file",
+        description = "Writes the backup file on this device, replacing the one already there.",
+        onConfirm = viewModel::backupUserData,
         focusRequester = first,
     )
     ActionRow(
