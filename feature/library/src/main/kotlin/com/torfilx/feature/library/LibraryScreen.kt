@@ -97,12 +97,15 @@ fun LibraryScreen(
                     state.mode == LibraryMode.MY_LIST -> "My List is empty"
                     state.mode == LibraryMode.SHOWS && state.isUnfiltered -> "No shows yet"
                     state.mode == LibraryMode.SHOWS -> "No shows match these filters"
+                    state.isUnfiltered -> "No movies yet"
                     else -> "No movies match these filters"
                 },
                 message = when {
                     state.mode == LibraryMode.MY_LIST -> "Press the Menu button on any title to add it here."
                     state.mode == LibraryMode.SHOWS && state.isUnfiltered ->
                         "The catalogue on this TV has no shows. New ones arrive with catalogue updates."
+                    state.isUnfiltered ->
+                        "The catalogue on this TV has no movies. New ones arrive with catalogue updates."
                     else -> "Try clearing the genre or watched filter."
                 },
                 actionLabel = "Refresh",
