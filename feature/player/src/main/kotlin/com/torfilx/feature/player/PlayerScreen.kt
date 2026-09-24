@@ -167,7 +167,7 @@ fun PlayerScreen(
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(TorfilxColors.Background)
+            .background(TorfilxColors.VideoBackground)
             .focusRequester(rootFocus)
             .focusable()
             .onRemoteKey { key, isKeyDown, _ ->
@@ -231,7 +231,7 @@ fun PlayerScreen(
 
         // While the TV renegotiates HDMI after a refresh-rate switch it shows garbage; cover it.
         if (displaySwitching) {
-            Box(Modifier.fillMaxSize().background(TorfilxColors.Background))
+            Box(Modifier.fillMaxSize().background(TorfilxColors.VideoBackground))
         }
 
         // Loading counts as well as buffering. Resolving a magnet can take a minute on a cold swarm,
@@ -369,6 +369,9 @@ private fun VideoSurface(
         factory = { context ->
             PlayerView(context).apply {
                 useController = false // the overlay above is the controller
+                // Black behind the picture as well as before it: the letterbox bars around a film that
+                // does not fill the screen are this view's background, not the video's.
+                setBackgroundColor(android.graphics.Color.BLACK)
                 setShutterBackgroundColor(android.graphics.Color.BLACK)
                 // Screen-on is driven by the window flag (KeepScreenOn) so it correctly clears when
                 // paused; forcing it here kept the screen on even while paused.

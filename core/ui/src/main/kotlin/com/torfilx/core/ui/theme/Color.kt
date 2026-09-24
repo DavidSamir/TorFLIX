@@ -32,6 +32,9 @@ object TorfilxColors {
     val ScrimSoft = Color(0x99141414)
     val Transparent = Color(0x00000000)
 
+    /** Behind video: true black, so letterbox bars disappear into the TV's own black. */
+    val VideoBackground = Color(0xFF000000)
+
     val ProgressTrack = Color(0x66FFFFFF)
     val ProgressFill = Accent
 }
