@@ -62,16 +62,27 @@ jobs:
 
       # Decide how this release is signed. With the persistent keystore it is a proper, upgradeable
       # release; without it, AGP falls back to an ad-hoc debug key that differs every run, so the
-      # build is NOT upgradeable in place. Rather than block, publish it but mark it loudly as a
-      # debug-signed test build (the warning is prepended in "Compose release notes" below) — the
-      # danger the guard exists to prevent is a *silent* non-upgradeable release, not a labelled one.
+      # build is NOT upgradeable in place.
+      #
+      # 0.x tags were test builds: they may publish debug-signed, marked loudly in the notes. From 1.0
+      # on a release is stable, and a stable release that cannot be upgraded in place is the one thing
+      # it must never be — every later update would need an uninstall that erases watch progress and My
+      # List. So a stable tag without the keystore fails here, before anything is built or published.
       - name: Determine signing mode
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
+          case "$GITHUB_REF_NAME" in
+            v0.*) stable=false ;;
+            *)    stable=true ;;
+          esac
+          echo "STABLE_RELEASE=$stable" >> "$GITHUB_ENV"
           if [ -n "$KEYSTORE_B64" ] && [ -n "$TORFILX_KEYSTORE_PASSWORD" ] \
              && [ -n "$TORFILX_KEY_ALIAS" ] && [ -n "$TORFILX_KEY_PASSWORD" ]; then
             echo "RELEASE_SIGNED=true" >> "$GITHUB_ENV"
             echo "Release will be signed with the persistent keystore."
+          elif [ "$stable" = true ]; then
+            echo "::error::$GITHUB_REF_NAME is a stable release, and no release keystore is configured. A stable release must be signed with the persistent key, or no later update can install over it. Add the four TORFILX_* secrets (docs/RELEASING.md) and push the tag again."
+            exit 1
           else
             echo "RELEASE_SIGNED=false" >> "$GITHUB_ENV"
             echo "::warning::No release keystore configured — publishing a DEBUG-SIGNED test build (not upgradeable in place). See docs/RELEASING.md to configure signing."
@@ -152,6 +163,31 @@ jobs:
             echo "apksigner not found; skipping certificate print." | tee dist/signer-certs.txt
           fi
 
+      # A keystore secret that is replaced — a new key made in a hurry, a different file pasted in —
+      # signs a perfectly valid APK that no installed TORFILX will accept as an update. The certificate
+      # every stable release must carry is pinned in the repository, and a stable release signed with
+      # anything else fails here, before it is published.
+      - name: Check the signing certificate is the pinned one
+        if: startsWith(github.ref, 'refs/tags/v') && env.STABLE_RELEASE == 'true'
+        run: |
+          pin_file=app/release-certificate.sha256
+          if [ ! -f "$pin_file" ]; then
+            echo "::error::$pin_file is missing. Pin the release certificate's SHA-256 there before the first stable release (docs/RELEASING.md)."
+            exit 1
+          fi
+          # Tolerates keytool's line pasted whole ("SHA256: AB:CD:…"), colons, tabs and CRLF.
+          expected=$(grep -v '^#' "$pin_file" | sed -E 's/^[[:space:]]*SHA-?256:?//I' | tr -d ' :\t\r\n' | tr 'A-F' 'a-f')
+          if [ -z "$expected" ]; then
+            echo "::error::$pin_file holds no fingerprint yet. Put the release certificate's SHA-256 in it before the first stable release (docs/RELEASING.md)."
+            exit 1
+          fi
+          actual=$(grep -m1 'certificate SHA-256 digest' dist/signer-certs.txt | sed 's/.*digest: *//' | tr -d ' :\r\n' | tr 'A-F' 'a-f')
+          if [ -z "$actual" ] || [ "$actual" != "$expected" ]; then
+            echo "::error::The APK is signed by certificate '${actual:-unknown}', but $pin_file pins '$expected'. Installed apps would refuse this update. Restore the original keystore secret; never rotate the key."
+            exit 1
+          fi
+          echo "Signed by the pinned release certificate $actual."
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -169,6 +205,12 @@ jobs:
           {
             if [ "$RELEASE_SIGNED" != "true" ]; then
               echo "> ⚠️ **Debug-signed test build.** Signed with an ad-hoc key that changes every build, so it **cannot upgrade an existing install** — uninstall any previous TORFILX before installing this one. Configure a release keystore (see \`docs/RELEASING.md\`) for proper upgradeable releases."
+              echo ""
+            fi
+            # The first stable release is the one key change there will ever be: every 0.x build was
+            # signed with a throwaway key, so none of them can be upgraded to 1.0 in place.
+            if [ "$GITHUB_REF_NAME" = "v1.0.0" ]; then
+              echo "> **Coming from a 0.x test build?** Those were signed with a temporary key, so Android will not install 1.0.0 over them. Uninstall TORFILX first (Settings → Applications → Manage Installed Applications → TORFILX → Uninstall), then install this one. From 1.0.0 on, every update installs in place and keeps your progress."
               echo ""
             fi
             echo "**Sideload onto a Fire TV**"

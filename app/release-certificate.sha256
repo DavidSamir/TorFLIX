@@ -1,0 +1,10 @@
+# SHA-256 of the certificate that signs every stable TORFILX release.
+#
+# CI refuses to publish a 1.0+ release signed by any other certificate: installed apps only accept
+# updates signed with the key they were installed with, so this value never changes.
+#
+# Fill it in once, from the release keystore, on the line below this comment (colons and case do
+# not matter):
+#
+#   keytool -list -v -keystore torfilx-release.jks -alias torfilx | grep SHA256:
+#
