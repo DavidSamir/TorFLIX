@@ -60,7 +60,7 @@ class SwarmCatalogueTransport(
     holePunchScope: CoroutineScope? = null,
 ) : CatalogueTransport {
 
-    private val holePuncher = holePunchScope?.let { HolePuncher(session, it, log) }
+    private val holePuncher = holePunchScope?.let { HolePuncher(session, it, log, blockingDispatcher = ioDispatcher) }
 
     /** One DHT lookup at a time, so a lookup's completion signal cannot be confused with another's. */
     private val lookupMutex = Mutex()

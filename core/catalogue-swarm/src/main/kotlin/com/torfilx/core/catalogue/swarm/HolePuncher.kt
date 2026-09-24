@@ -1,7 +1,9 @@
 package com.torfilx.core.catalogue.swarm
 
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -43,6 +45,13 @@ class HolePuncher(
     private val session: () -> SessionManager?,
     private val scope: CoroutineScope,
     private val log: SwarmLog = SwarmLog.NONE,
+    /**
+     * Where the DHT lookup waits. It blocks its thread for up to [LOOKUP_TIMEOUT_S] per torrent, so it
+     * must not be [scope]'s own dispatcher: in the app that is Default, which has two threads on a Fire
+     * TV stick, and two punchers waiting at once froze the player's position ticker, progress saves and
+     * the next-episode countdown for the length of the lookup.
+     */
+    private val blockingDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     /** Tracked info hashes (lower-case hex) and the addresses the DHT last listed for each. */
     private val tracked = ConcurrentHashMap<String, List<TcpEndpoint>>()
@@ -88,7 +97,7 @@ class HolePuncher(
                 // costs no lookups until it is back.
                 if (runCatching { live.find(Sha1Hash(hash))?.isValid }.getOrNull() != true) continue
                 val found = try {
-                    runInterruptible { live.dhtGetPeers(Sha1Hash(hash), LOOKUP_TIMEOUT_S) }
+                    runInterruptible(blockingDispatcher) { live.dhtGetPeers(Sha1Hash(hash), LOOKUP_TIMEOUT_S) }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (@Suppress("TooGenericExceptionCaught") error: Exception) {
