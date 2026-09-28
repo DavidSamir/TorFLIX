@@ -66,7 +66,20 @@ class PlaybackControllerShowTest {
 
     private val entries: List<CatalogEntryDto> = CatalogIds.pin(
         TestCatalogues.entries(1).map { it.copy(id = null) } +
-            TestCatalogues.show(title = "Twilight", seasons = 1, episodesPerSeason = 3) +
+            TestCatalogues.show(title = "Twilight", seasons = 1, episodesPerSeason = 3).let { show ->
+                show.copy(
+                    seasons = show.seasons.map { season ->
+                        season.copy(
+                            packs = listOf(
+                                CatalogMagnetDto(
+                                    quality = "720p",
+                                    magnet = TestCatalogues.magnet(SEASON_PACK_HASH),
+                                ),
+                            ),
+                        )
+                    },
+                )
+            } +
             CatalogEntryDto(
                 type = CatalogEntryDto.TYPE_SHOW,
                 title = "Lost",
@@ -195,6 +208,43 @@ class PlaybackControllerShowTest {
             FileSelection.PreferEpisode(EpisodeFileMatcher.Target(season = 1, episode = 2, ordinal = 1, episodesInSeason = 3)),
         )
         assertThat(name).isEqualTo("Twilight · S1 E2")
+    }
+
+    @Test
+    fun `an unavailable episode torrent falls through to its season pack`() = runTest(main.dispatcher) {
+        timeouts = 2
+        val c = controller()
+
+        c.open(PlaybackRequest(e2))
+
+        assertThat(c.state.value.error).isNull()
+        assertThat(c.state.value.episode?.id).isEqualTo(e2)
+        assertThat(streamed).hasSize(3)
+        assertThat(streamed.take(2).map { MagnetLink.infoHashOf(it.first) })
+            .containsExactly(hashOf(episodes[1]), hashOf(episodes[1]))
+        val (packMagnet, selection, _) = streamed.last()
+        assertThat(MagnetLink.infoHashOf(packMagnet))
+            .isEqualTo(MagnetLink.infoHashOf(TestCatalogues.magnet(SEASON_PACK_HASH)))
+        assertThat(selection).isEqualTo(
+            FileSelection.Episode(EpisodeFileMatcher.Target(season = 1, episode = 2, ordinal = 1, episodesInSeason = 3)),
+        )
+        coVerify { coordinator.discard(hashOf(episodes[1])) }
+    }
+
+    @Test
+    fun `a timeout on the only source remains retryable`() = runTest(main.dispatcher) {
+        timeouts = 2
+        val c = controller()
+
+        c.open(PlaybackRequest(filmId))
+        assertThat(c.state.value.error).isInstanceOf(PlaybackError.Network::class.java)
+
+        c.retry()
+        runCurrent()
+
+        assertThat(c.state.value.error).isNull()
+        assertThat(c.state.value.item?.id).isEqualTo(filmId)
+        assertThat(streamed).hasSize(3)
     }
 
     @Test
@@ -350,6 +400,7 @@ class PlaybackControllerShowTest {
 
     private companion object {
         const val MINUTE = 60_000L
+        const val SEASON_PACK_HASH = 999_999
     }
 
     // --- The remote's next key ------------------------------------------------------------------
@@ -474,7 +525,12 @@ class PlaybackControllerShowTest {
         // Both attempts at the second episode's swarm time out; the position ticker runs throughout,
         // with the player still reporting the first episode's final position.
         timeouts = 2
-        c.playNext()
+        c.open(
+            PlaybackRequest(
+                playableId = e2,
+                sourceId = "torrent-${hashOf(episodes[1])}",
+            ),
+        )
         advanceTimeBy(5_000)
         runCurrent()
         assertThat(c.state.value.error).isInstanceOf(PlaybackError.Network::class.java)

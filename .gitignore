@@ -45,3 +45,4 @@ temp-fetch/
 !/README.md
 !/scripts/publish-catalog/README.md
 torfilx-release.jks.txt
+scripts/publish-catalog

@@ -57,6 +57,24 @@ again. Running it while an earlier run is still publishing is fine: the new run 
 | `output/` | Written by every run: `catalog.json`, `merge-report.txt`, `merge-summary.properties` |
 | `.release/` | Every release built, `torfilx-catalogue-N/` and its `.torrent`, and `versions-used.txt`. Never edited |
 
+## Build a TV-show file
+
+`build_pd_show.py` turns a show name into one catalogue JSON file. TVMaze supplies
+show and episode metadata; its alternate titles are searched across Internet Archive
+title, subject, description, series and identifier fields. The builder reads Archive's
+torrent directly. A torrent containing every episode of one season is written once as a
+season pack; partial and single-episode torrents stay as episode sources.
+
+```powershell
+python build_pd_show.py "The Beverly Hillbillies" --year 1962 --dry-run
+python build_pd_show.py "The Beverly Hillbillies" --year 1962
+```
+
+Use `--verbose` to see which Archive file matched each episode, and `--force` to
+replace an existing JSON file. Without `--force`, a `.pd.json` file is written beside it.
+When that existing file describes the same show, its `id` is copied into the generated file so the
+merge replaces the show instead of displaying a second copy.
+
 `add/`, `remove/`, `published/` and `output/` are not committed (this repository is public).
 
 ### published/: every release pushed

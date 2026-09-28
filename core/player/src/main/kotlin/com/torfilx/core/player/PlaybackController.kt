@@ -320,6 +320,7 @@ class PlaybackController @Inject constructor(
         // An explicit choice from the details screen wins over automatic selection — that is the
         // whole point of offering "server or swarm" to the user.
         val chosen = request.sourceId?.let { id -> info.sources.firstOrNull { it.id == id } }
+        val failedSourceIds = playbackInfoRepository.failedSourceIds(request.playableId).toMutableSet()
         val selection = if (chosen != null) {
             SourceSelector.Result(chosen, SourceSelector.Reason.DIRECT_PLAY)
         } else {
@@ -327,11 +328,11 @@ class PlaybackController @Inject constructor(
                 sources = info.sources,
                 capabilities = playbackInfoRepository.capabilities(),
                 preference = settings.quality,
-                failedSourceIds = playbackInfoRepository.failedSourceIds(request.playableId),
+                failedSourceIds = failedSourceIds,
             )
         }
-        val source = selection.source
-        if (source == null) {
+        val firstSource = selection.source
+        if (firstSource == null) {
             TorfilxLog.w(TAG, "No playable source for ${request.playableId}: ${selection.reason}")
             _state.value = _state.value.copy(
                 isLoading = false,
@@ -348,6 +349,7 @@ class PlaybackController @Inject constructor(
             )
             return
         }
+        var source = checkNotNull(firstSource)
 
         // A film is its own title. An episode plays under its show's title, with the episode named on
         // the line beneath it.
@@ -363,6 +365,8 @@ class PlaybackController @Inject constructor(
         val startPosition = request.startPositionMs
             ?: ResumeRules.resumePositionMs(info.resume ?: storedProgress)
 
+        // Claim the new playable before a slow swarm lookup. The position ticker may run while the
+        // lookup waits; it must never attribute the previous episode's final position to this one.
         resolved = ResolvedPlayback(
             playableId = request.playableId,
             item = item,
@@ -379,13 +383,68 @@ class PlaybackController @Inject constructor(
 
         // A torrent source is a magnet, not a URL: the engine resolves it to a loopback HTTP stream
         // that serves pieces as they arrive, so playback starts long before the download finishes.
-        val stream: TorrentStream? = if (source.kind == SourceKind.TORRENT) {
+        var stream: TorrentStream? = null
+        while (source.kind == SourceKind.TORRENT) {
             val magnet = source.magnetUri ?: source.url
-            streamWithRetry(magnet, request.playableId, fileSelectionFor(source, episode), displayNameFor(item, episode))
-                ?: return
-        } else {
-            null
+            try {
+                stream = streamWithRetry(
+                    magnet,
+                    request.playableId,
+                    fileSelectionFor(source, episode),
+                    displayNameFor(item, episode),
+                )
+                break
+            } catch (error: TorrentError) {
+                // A hand-picked source is a decision, not a hint. System-wide failures also cannot be
+                // repaired by trying another magnet. An unavailable/malformed swarm or a pack without
+                // this episode is source-specific, though: remember it and try the next source. This is
+                // especially important when an old per-episode swarm is listed before a healthy pack.
+                if (chosen != null || !error.isSourceSpecific()) {
+                    showTorrentError(error)
+                    return
+                }
+
+                val withFailedSource = failedSourceIds + source.id
+                val alternative = SourceSelector.select(
+                    sources = info.sources,
+                    capabilities = playbackInfoRepository.capabilities(),
+                    preference = settings.quality,
+                    failedSourceIds = withFailedSource,
+                ).source
+                if (alternative == null) {
+                    // Keep the paused torrent and do not remember the failure: Retry should give its
+                    // swarm another chance when this was the title's only usable source.
+                    showTorrentError(error)
+                    return
+                }
+                playbackInfoRepository.markSourceFailed(request.playableId, source.id)
+                failedSourceIds += source.id
+                MagnetLink.infoHashOf(magnet)?.let { failedHash ->
+                    runCatching { torrentCoordinator.discard(failedHash) }
+                }
+                TorfilxLog.i(TAG, "Source ${source.id} failed for ${request.playableId}; trying ${alternative.id}")
+                _state.value = _state.value.copy(
+                    isLoading = true,
+                    loadingDetail = "That source is unavailable — trying another",
+                    error = null,
+                )
+                source = alternative
+            }
         }
+
+        resolved = ResolvedPlayback(
+            playableId = request.playableId,
+            item = item,
+            episode = episode,
+            subtitles = info.subtitles,
+            audio = info.audioTracks,
+            markers = info.markers,
+            spriteSheet = info.spriteSheet,
+            durationMs = durationMs,
+            sourceId = source.id,
+            isTranscode = source.kind == SourceKind.HLS,
+            frameRate = source.frameRate,
+        )
 
         val exoItem = buildMediaItem(stream?.url ?: source.url, info.subtitles, source.kind)
         var handedOver = false
@@ -484,7 +543,7 @@ class PlaybackController @Inject constructor(
         playableId: String,
         selection: FileSelection,
         displayName: String?,
-    ): TorrentStream? {
+    ): TorrentStream {
         var lastError: TorrentError? = null
         for (attempt in 1..STREAM_ATTEMPTS) {
             if (attempt > 1) {
@@ -507,14 +566,22 @@ class PlaybackController @Inject constructor(
                 if (!transient) break
             }
         }
+        throw checkNotNull(lastError) { "A torrent stream attempt ended without a result or an error" }
+    }
+
+    private fun showTorrentError(error: TorrentError) {
         _state.value = _state.value.copy(
             isLoading = false,
             loadingDetail = null,
-            error = lastError?.toPlaybackError()
-                ?: PlaybackError.Unknown("This title could not be started."),
+            error = error.toPlaybackError(),
         )
-        return null
     }
+
+    /** True when another source for the same title can reasonably succeed. */
+    private fun TorrentError.isSourceSpecific(): Boolean =
+        this is TorrentError.MetadataTimeout ||
+            this is TorrentError.InvalidMagnet ||
+            this is TorrentError.NoPlayableFile
 
     // --- Shows ----------------------------------------------------------------------------------
 
