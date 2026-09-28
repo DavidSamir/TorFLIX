@@ -121,9 +121,9 @@ object SourceSelector {
         return compareBy<MediaSource> { source -> if ((source.height ?: 0) > ceiling) 0 else 1 }
             .thenBy { if (it.isTranscode) 0 else 1 }
             .thenBy { it.height ?: 0 }
-            // At the same quality an episode's own torrent beats a season pack: a smaller download,
-            // a smaller unit to evict, and no chance of the wrong file being picked from it.
-            .thenBy { if (it.isSeasonPack) 0 else 1 }
+            // A verified season pack is the preferred TV source: one healthy swarm serves the whole
+            // season and consecutive episodes can reuse the same torrent handle.
+            .thenBy { if (it.isSeasonPack) 1 else 0 }
             .thenBy { it.bitrate ?: 0L }
     }
 }

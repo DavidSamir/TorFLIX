@@ -272,9 +272,9 @@ class SourceSelectorTest {
     )
 
     @Test
-    fun `at the same quality an episode's own torrent beats its season pack`() {
+    fun `at the same quality a season pack beats an episode torrent`() {
         val result = SourceSelector.select(listOf(pack("p", 1080), torrent("own", 1080)), fireStick1080)
-        assertThat(result.source?.id).isEqualTo("torrent-own")
+        assertThat(result.source?.id).isEqualTo("pack-p")
     }
 
     @Test

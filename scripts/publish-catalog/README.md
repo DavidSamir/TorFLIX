@@ -62,8 +62,10 @@ again. Running it while an earlier run is still publishing is fine: the new run 
 `build_pd_show.py` turns a show name into one catalogue JSON file. TVMaze supplies
 show and episode metadata; its alternate titles are searched across Internet Archive
 title, subject, description, series and identifier fields. The builder reads Archive's
-torrent directly. A torrent containing every episode of one season is written once as a
-season pack; partial and single-episode torrents stay as episode sources.
+torrent directly. A torrent containing every episode of one season is eligible as a season pack.
+The builder scrapes its HTTP trackers and keeps one pack per season, ranked by seeds, then leechers;
+a healthy multi-season torrent can therefore serve several seasons. Partial and single-episode
+torrents stay as episode sources only when no complete pack exists for that season.
 
 ```powershell
 python build_pd_show.py "The Beverly Hillbillies" --year 1962 --dry-run

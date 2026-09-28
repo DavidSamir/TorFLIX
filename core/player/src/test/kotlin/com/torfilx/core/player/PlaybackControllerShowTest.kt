@@ -72,7 +72,10 @@ class PlaybackControllerShowTest {
                         season.copy(
                             packs = listOf(
                                 CatalogMagnetDto(
-                                    quality = "720p",
+                                    // Deliberately below the episode fixtures: these controller tests
+                                    // exercise episode-to-pack fallback. Equal-quality pack priority is
+                                    // covered by SourceSelectorTest.
+                                    quality = "480p",
                                     magnet = TestCatalogues.magnet(SEASON_PACK_HASH),
                                 ),
                             ),
