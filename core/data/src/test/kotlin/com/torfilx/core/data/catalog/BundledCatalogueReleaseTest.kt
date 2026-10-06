@@ -39,7 +39,9 @@ class BundledCatalogueReleaseTest {
         val manifest = CatalogueJson.manifest.decodeFromString(BundledCatalogManifest.serializer(), manifestFile.readText())
 
         assertThat(manifest.schemaVersion).isEqualTo(CatalogRelease.SCHEMA_VERSION)
-        assertThat(manifest.catalogVersion).isAtLeast(1L)
+        assertThat(manifest.catalogVersion).isEqualTo(7L)
+        assertThat(manifest.titleCount).isEqualTo(2028)
+        assertThat(manifest.sha256).isEqualTo("b8c39fdef690bc2ab5f0735f1ec0f29757defa69c6dedcfb4d0fcc240e7e367e")
         assertWithMessage("catalog.json changed without rebuilding catalog-manifest.json")
             .that(manifest.sha256).isEqualTo(Sha256.hex(bytes))
         assertThat(manifest.jsonBytes).isEqualTo(bytes.size.toLong())
@@ -47,22 +49,28 @@ class BundledCatalogueReleaseTest {
     }
 
     @Test
-    fun `every bundled title has a pinned id, the same id the app derived before ids were pinned`() {
+    fun `every bundled title has a pinned id that survives publisher round trips`() {
         val entries = entries()
 
         assertThat(entries.filter { it.id == null }.map { it.title }).isEmpty()
         val episodes = entries.flatMap { entry -> entry.seasons.flatMap { it.episodes } }
         assertThat(episodes.filter { it.id == null }).isEmpty()
-        // Deriving again from scratch must give exactly the pinned ids, or progress saved under the old
-        // derived ids would be orphaned by the build that introduced pinning. Episodes included: their
-        // ids are what the viewer's progress on each one is stored under.
-        val unpinned = entries.map { entry ->
-            entry.copy(
-                id = null,
-                seasons = entry.seasons.map { season -> season.copy(episodes = season.episodes.map { it.copy(id = null) }) },
-            )
+        // Published catalogues may choose explicit ids. Re-deriving them from renamed titles would
+        // discard the publisher's stable ids and orphan progress already saved from that release.
+        assertThat(CatalogIds.pin(entries)).isEqualTo(entries)
+    }
+
+    @Test
+    fun `catalogue seven retains ids from the previous built-in catalogue`() {
+        val entries = entries()
+        val ids = entries.mapNotNull { it.id } + entries.flatMap { entry ->
+            entry.seasons.flatMap { season -> season.episodes.mapNotNull { it.id } }
         }
-        assertThat(CatalogIds.pin(unpinned)).isEqualTo(entries)
+        assertThat(ids).containsAtLeastElementsIn(
+            listOf("show-the-beverly-hillbillies-1962") + (1..4).map {
+                "show-the-beverly-hillbillies-1962-s01e${it.toString().padStart(2, '0')}"
+            },
+        )
     }
 
     @Test

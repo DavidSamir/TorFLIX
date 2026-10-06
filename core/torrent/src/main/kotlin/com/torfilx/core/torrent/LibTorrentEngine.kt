@@ -90,7 +90,7 @@ class LibTorrentEngine @Inject constructor(
     private val streamServer = TorrentStreamServer()
 
     /** Records network events so a failed play can explain itself on screen (see [diagnosticsText]). */
-    private val diagnostics = TorrentDiagnostics()
+    private val diagnostics by lazy { TorrentDiagnostics() }
     /** Streaming *and* seeding torrents; a torrent leaves this map only when it is removed. */
     private val managedTorrents = java.util.concurrent.ConcurrentHashMap<String, StreamedTorrent>()
 
@@ -176,6 +176,7 @@ class LibTorrentEngine @Inject constructor(
     override fun isAvailable(): Boolean {
         nativeAvailable?.let { return it }
         val available = runCatching {
+            NativeTorrentLibrary.configure(context)
             // Touching a native-backed class is the only reliable way to know the .so loaded.
             org.libtorrent4j.LibTorrent.version()
             true

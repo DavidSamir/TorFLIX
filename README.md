@@ -1,6 +1,6 @@
 # TORFILX
 
-A Netflix-style Fire TV app whose library is a **signed catalogue of public-domain films and TV shows**, played
+A Netflix-style Fire TV app whose library is a **signed catalogue of films and TV shows**, played
 over BitTorrent. There is no media server and no backend: the app ships a catalogue, keeps it current
 from the peer network, streams each title from its magnet link, and (with the viewer's consent) shares
 what it has downloaded.
@@ -34,6 +34,28 @@ what it has downloaded.
 - A Fire TV / Android TV device or emulator (arm64-v8a, armeabi-v7a or x86_64)
 
 ## Device support
+
+Version **1.0.1** bundles **catalogue 7** (2,028 titles and 3,309 episodes), so a first install has the
+catalogue immediately. Its bytes and pinned title ids match the published release. Nine films and
+1,127 episodes in that release contain metadata but no torrent sources; the bundle preserves them
+as published.
+
+One APK keeps two native builds of the same libtorrent4j 1.2.3.0 JNI API. **API 22–29 uses the original
+library**, preserving old Fire Stick support. **API 30+ uses an Android 11 compatibility build**:
+network addresses come from bionic's `getifaddrs()` and network changes are polled without binding a
+restricted `NETLINK_ROUTE` socket. The compatibility library targets API 24 and has 16 KiB ELF load
+alignment; it is never loaded on old Fire OS 5 devices. The APK still has `minSdk 22`, both ARM ABIs,
+and v1 signing. Actual native socket binding, metadata exchange and byte transfer are tested on
+API 22 and API 30 emulators before a release can publish. Xiaomi hardware validation remains a
+separate check after installing the release.
+
+The compatibility build is reproducible under Linux/WSL. Install CMake, Ninja, Git, Python 3, Perl,
+curl and unzip, then run `scripts/native-torrent/prepare.sh` followed by
+`scripts/native-torrent/build_android.sh <abi>`. Sources and downloaded dependencies are pinned;
+the source patch lives in `scripts/native-torrent/patch_android.py`. Copy the resulting library from
+`$HOME/torfilx-native/build/<abi>/libtorrent4j-android11.so` into
+`core/torrent/src/main/jniLibs/<abi>/libtorrent4j-android11.so` (or use `TORFILX_NATIVE_WORK` for a different
+work directory). Build all four ABIs for the device tests; releases package the two ARM ABIs.
 
 Scope as of **August 2026**. The build's floor is deliberately low — `minSdk 22`, ARM-only release
 ABIs, no Google Play Services anywhere in the graph, `leanback` declared optional — so the APK
@@ -122,10 +144,9 @@ works on Android-based TV OSes and nowhere else, which is exactly the two rows w
 2. **Google's sideload lockdown.** Developer verification (identity + a $25 registration) begins
    September 2026 in Brazil, Indonesia, Singapore and Thailand, expanding through 2027, and covers
    certified Google TV devices. Rows 3–8 are the growth path and they are what this hits.
-3. **16 KB page sizes.** `libtorrent4j` is pinned to 1.2.3.0 — the only build whose native symbols
-   resolve on API 22 — and it is almost certainly not 16 KB-aligned. Harmless on Fire TV (4 KB,
-   32-bit) but a latent `.so` load failure on Android 15/16 arm64, i.e. Fire OS 16 and the newest
-   Google TV sets. Verify before claiming row 2.
+3. **16 KB page sizes.** The Android 11 compatibility library has 16 KiB ELF load alignment.
+   Release checks verify that alignment and retain the original API 22 library. A real 16 KiB
+   Android device still needs playback validation before claiming full device support.
 4. **x86 is release-stripped.** An x86 Android TV box or ChromeOS will not run a release build; the
    debug variant still does.
 

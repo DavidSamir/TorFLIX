@@ -1,0 +1,15 @@
+cmake_minimum_required(VERSION 3.22)
+project(torfilx_torrent_compat LANGUAGES C CXX)
+
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+set(deprecated-functions OFF CACHE BOOL "" FORCE)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_CXX_STANDARD 14)
+add_subdirectory("${LIBTORRENT_SOURCE}" libtorrent)
+
+add_library(torrent4j-android11 SHARED "${LIBTORRENT4J_SOURCE}/swig/libtorrent_jni.cpp")
+target_include_directories(torrent4j-android11 PRIVATE "${LIBTORRENT4J_SOURCE}/swig")
+target_link_libraries(torrent4j-android11 PRIVATE torrent-rasterbar dl log)
+target_compile_options(torrent-rasterbar PRIVATE -Os -fvisibility=hidden)
+target_compile_options(torrent4j-android11 PRIVATE -Os -fvisibility=hidden)
+target_link_options(torrent4j-android11 PRIVATE -Wl,-z,max-page-size=16384 -Wl,--exclude-libs,ALL)

@@ -7,9 +7,9 @@ android {
     namespace = "com.torfilx.core.torrent"
 
     defaultConfig {
-        // Fire TV is arm64 (4K/Max/Cube) or armeabi-v7a (older sticks); x86_64 is for the emulator.
+        // Both ARM ABIs cover TV hardware; x86/x86_64 exercise old and modern Android emulators.
         ndk {
-            abiFilters += setOf("arm64-v8a", "armeabi-v7a", "x86_64")
+            abiFilters += setOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
         }
     }
 

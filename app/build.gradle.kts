@@ -32,8 +32,8 @@ android {
 
     defaultConfig {
         applicationId = "com.torfilx.tv"
-        versionCode = 22
-        versionName = "1.0.0"
+        versionCode = 23
+        versionName = "1.0.1"
         testInstrumentationRunner = "com.torfilx.tv.HiltTestRunner"
         resourceConfigurations += setOf("en")
     }
@@ -42,15 +42,22 @@ android {
         buildConfig = true
     }
 
+    packaging {
+        jniLibs {
+            // Keep Maven's old-device engine byte for byte. The compatibility binaries are
+            // already stripped by their pinned NDK build; neither needs AGP to strip it again.
+            keepDebugSymbols += setOf("**/libtorrent4j-1.2.3.0.so", "**/libtorrent4j-android11.so")
+        }
+    }
+
     androidResources {
         // Ship the catalogue uncompressed.
         //
-        // It is a 2.1 MB asset that was being DEFLATEd into the APK, and a *compressed* asset has to
+        // A *compressed* asset has to
         // be inflated through AssetManager's buffer, which on older Android is capped
         // (UNCOMPRESS_DATA_MAX, 1 MB) — squarely a Fire OS 5/6 concern, which is the floor this app
         // targets. Stored, the asset is read straight out of the APK with no inflate step and no cap,
-        // and it also loads faster on a very slow CPU. The cost is APK size: the catalogue compresses
-        // ~91%, so this adds about 2 MB.
+        // and it also loads faster on a very slow CPU. Catalogue 7 adds about 5.5 MB stored.
         noCompress += "json"
     }
 
@@ -158,6 +165,8 @@ dependencies {
 
     testImplementation(projects.core.testing)
     androidTestImplementation(projects.core.testing)
+    androidTestImplementation(projects.core.catalogueSwarm)
+    androidTestImplementation(libs.libtorrent4j)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(libs.hilt.android.testing)
     androidTestImplementation(libs.androidx.test.rules)

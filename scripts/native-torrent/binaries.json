@@ -1,0 +1,27 @@
+{
+  "libtorrentCommit": "078f7b956ef0d992948852a801e626b1118a1fc5",
+  "libtorrent4jCommit": "f966d9e81be4aa73dea1e8d284505eee844e77d7",
+  "androidNdk": "r25c",
+  "boost": "1.72.0",
+  "openssl": "1.1.1w",
+  "nativeMinSdk": 24,
+  "loadedOnApi": 30,
+  "libraries": {
+    "arm64-v8a": {
+      "sha256": "0e3b38ef2582ae68ea26cf5281efef7cda0aa7d6981506427d19d97c7a006251",
+      "bytes": 7393128
+    },
+    "armeabi-v7a": {
+      "sha256": "9f688f2503f6a33b67d3d040ff13a1ae8848eb7e36d9d7df1cbbe2cd20024cbe",
+      "bytes": 5430392
+    },
+    "x86": {
+      "sha256": "f2097d686efba0a033d34195917c2c27e2e358fa2714ca6a6c364efb43028dbd",
+      "bytes": 8187764
+    },
+    "x86_64": {
+      "sha256": "a9a3dfa4141614c08571859e5bdf1f2357f64b9e672e55825b31ccad4444de8f",
+      "bytes": 7792592
+    }
+  }
+}

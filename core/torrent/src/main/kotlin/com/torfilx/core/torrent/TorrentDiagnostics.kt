@@ -129,6 +129,7 @@ internal class TorrentDiagnostics : AlertListener {
     fun summary(dhtNodes: Long, dhtRunning: Boolean): String = synchronized(lock) {
         buildString {
             appendLine("device: Android ${Build.VERSION.SDK_INT} · ${Build.SUPPORTED_ABIS.firstOrNull() ?: "?"}")
+            appendLine("engine: ${NativeTorrentLibrary.variant}")
             appendLine("listen: ${if (listenOk) "OK" else "not bound"} ($listenDetail)")
             appendLine("DHT: running=$dhtRunning nodes=$dhtNodes bootstrapped=$dhtBootstrapped")
             appendLine(

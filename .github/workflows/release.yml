@@ -21,11 +21,19 @@ permissions:
   contents: write
 
 jobs:
-  # Instrumented tests need an emulator, so they run in their own job. It does not gate the release
-  # job (an emulator can be flaky in CI), but it does run the Room migration test — the guard against
-  # the first schema change crash-looping every device — on every push and PR.
+  # Exercise the actual APK's native sockets and torrent transfer on the old Fire OS floor and
+  # modern Android. A release must pass both before publishing.
   instrumented:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - api: 22
+            arch: x86
+            target: default
+          - api: 30
+            arch: x86_64
+            target: google_apis
     steps:
       - uses: actions/checkout@v4
       - name: Set up JDK 17
@@ -41,13 +49,22 @@ jobs:
       - name: Migration + instrumented tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 30
-          arch: x86_64
-          target: google_apis
-          script: ./gradlew :core:data:connectedDebugAndroidTest --no-daemon --stacktrace
+          api-level: ${{ matrix.api }}
+          arch: ${{ matrix.arch }}
+          target: ${{ matrix.target }}
+          script: ./gradlew :core:data:connectedDebugAndroidTest :app:connectedDebugAndroidTest --no-daemon --stacktrace --max-workers=2 -Dorg.gradle.parallel=false '-Dorg.gradle.jvmargs=-Xmx2048m -XX:MaxMetaspaceSize=768m'
+      - name: Upload device test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: instrumented-api-${{ matrix.api }}
+          path: |
+            app/build/outputs/androidTest-results/connected/
+            core/data/build/outputs/androidTest-results/connected/
 
   build:
     runs-on: ubuntu-latest
+    needs: instrumented
 
     # Secrets are mapped to env here because the `secrets` context is not available in a step-level
     # `if:` — referencing it there makes GitHub reject the whole workflow before any job starts.
@@ -188,6 +205,11 @@ jobs:
           fi
           echo "Signed by the pinned release certificate $actual."
 
+      # Keep the API 22 engine alongside the Android 11 compatibility engine, and verify
+      # that the requested catalogue is actually inside the signed APK.
+      - name: Verify native engines and bundled catalogue
+        run: python3 scripts/native-torrent/verify_apk.py dist/torfilx-release.apk
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -211,6 +233,16 @@ jobs:
             # signed with a throwaway key, so none of them can be upgraded to 1.0 in place.
             if [ "$GITHUB_REF_NAME" = "v1.0.0" ]; then
               echo "> **Coming from a 0.x test build?** Those were signed with a temporary key, so Android will not install 1.0.0 over them. Uninstall TORFILX first (Settings → Applications → Manage Installed Applications → TORFILX → Uninstall), then install this one. From 1.0.0 on, every update installs in place and keeps your progress."
+              echo ""
+            fi
+            if [ "$GITHUB_REF_NAME" = "v1.0.1" ]; then
+              echo "**Google TV compatibility and built-in catalogue 7**"
+              echo ""
+              echo "Android 11 and newer use a patched torrent engine that avoids restricted netlink sockets. Android 5.1 through 10 retain the original engine, with the API 22 minimum and v1 signing preserved for older Firesticks. Native DHT responses, socket binding, metadata exchange and torrent transfers pass on API 22 and API 30 emulators. Xiaomi hardware still needs an installation check."
+              echo ""
+              echo "Catalogue 7 is built into the APK: 2,028 titles and 3,309 episodes, with the published IDs preserved for watch progress. Catalogue browsing works immediately, before peer discovery. The published catalogue contains nine films and 1,127 episodes without torrent sources; these remain visible as published."
+              echo ""
+              echo "Signed with the existing release key: install over 1.0.0 to keep your app data."
               echo ""
             fi
             echo "**Sideload onto a Fire TV**"
