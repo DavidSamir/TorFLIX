@@ -37,7 +37,6 @@ import com.torfilx.core.ui.component.PosterCard
 import com.torfilx.core.ui.component.RowHeader
 import com.torfilx.core.ui.component.SearchField
 import com.torfilx.core.ui.component.TvTextLink
-import com.torfilx.core.ui.focus.keepNeighbourRowComposed
 import com.torfilx.core.ui.theme.LocalTorfilxDimens
 import com.torfilx.core.ui.theme.TorfilxColors
 import com.torfilx.core.ui.theme.TorfilxType
@@ -63,7 +62,6 @@ fun SearchScreen(
     var layout by remember { mutableStateOf(KeyboardLayout.LATIN) }
     val firstKeyFocus = remember { FocusRequester() }
     val resultsState = rememberLazyGridState()
-    val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     LaunchedEffect(Unit) {
         runCatching { firstKeyFocus.requestFocus() }
@@ -141,15 +139,8 @@ fun SearchScreen(
                         PosterCard(
                             card = result.card,
                             onClick = { onOpenDetails(result.card.item.id) },
-                            // Same dead-end as every other lazy layout on this screen family: without
-                            // it the results stop at the last composed row.
-                            modifier = Modifier.fillMaxWidth().wrapContentWidth().keepNeighbourRowComposed(
-                                index = index,
-                                itemCount = state.results.size,
-                                state = resultsState,
-                                scope = scope,
-                                columns = RESULT_COLUMNS,
-                            ),
+                            // Keep vertical scrolling tied to the selected cell, not its neighbours.
+                            modifier = Modifier.fillMaxWidth().wrapContentWidth(),
                         )
                     }
                 }

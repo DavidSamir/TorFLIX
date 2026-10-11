@@ -17,7 +17,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.platform.LocalContext
@@ -33,7 +32,6 @@ import com.torfilx.core.ui.component.EmptyState
 import com.torfilx.core.ui.component.PosterCard
 import com.torfilx.core.ui.component.SkeletonRow
 import com.torfilx.core.ui.component.TvChip
-import com.torfilx.core.ui.focus.keepNeighbourRowComposed
 import com.torfilx.core.ui.theme.LocalTorfilxDimens
 import com.torfilx.core.ui.theme.TorfilxColors
 import com.torfilx.core.ui.theme.TorfilxType
@@ -61,7 +59,6 @@ fun LibraryScreen(
 
     val dimens = LocalTorfilxDimens.current
     val gridState = rememberLazyGridState()
-    val scope = rememberCoroutineScope()
 
     Column(modifier = modifier.fillMaxSize().background(TorfilxColors.Background)) {
         state.errorMessage?.let { message ->
@@ -140,16 +137,12 @@ fun LibraryScreen(
                         onClick = { onOpenDetails(card.item.id) },
                         onLongClick = { viewModel.toggleMyList(card) },
                         modifier = Modifier
+                            // The grid handles focus scrolling, including off-screen cells. A
+                            // focus-triggered scroll to a neighbouring row also runs on Left/Right
+                            // and fights the scroll that keeps the selected poster in view.
                             // A cell is a little wider than a poster: centre it, so the gaps are even.
                             .fillMaxWidth()
-                            .wrapContentWidth()
-                            .keepNeighbourRowComposed(
-                                index = index,
-                                itemCount = state.cards.size,
-                                state = gridState,
-                                scope = scope,
-                                columns = GRID_COLUMNS,
-                            ),
+                            .wrapContentWidth(),
                     )
                 }
             }

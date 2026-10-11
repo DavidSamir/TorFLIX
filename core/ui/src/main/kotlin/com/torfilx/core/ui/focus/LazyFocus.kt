@@ -1,7 +1,6 @@
 package com.torfilx.core.ui.focus
 
 import androidx.compose.foundation.lazy.LazyListState
-import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.onFocusChanged
 import kotlinx.coroutines.CoroutineScope
@@ -45,36 +44,6 @@ fun Modifier.keepNeighbourComposed(
         val target = when {
             index + step > last -> index + step
             index - step < first -> index - step
-            else -> return@launch
-        }
-        runCatching {
-            state.animateScrollToItem(target.coerceIn(0, (itemCount - 1).coerceAtLeast(0)))
-        }
-    }
-}
-
-/**
- * The grid equivalent of [keepNeighbourComposed]: keeps the row above and below the focused cell
- * composed, so vertical navigation through a long grid never stops at the bottom of the viewport.
- *
- * @param columns cells per row, which is how far one vertical press moves in index terms.
- */
-fun Modifier.keepNeighbourRowComposed(
-    index: Int,
-    itemCount: Int,
-    state: LazyGridState,
-    scope: CoroutineScope,
-    columns: Int,
-): Modifier = this.onFocusChanged { focusState ->
-    if (!focusState.hasFocus) return@onFocusChanged
-    scope.launch {
-        val visible = state.layoutInfo.visibleItemsInfo
-        val first = visible.firstOrNull()?.index ?: return@launch
-        val last = visible.lastOrNull()?.index ?: return@launch
-        val rowStart = (index / columns) * columns
-        val target = when {
-            index + columns > last -> rowStart + columns
-            index - columns < first -> rowStart - columns
             else -> return@launch
         }
         runCatching {

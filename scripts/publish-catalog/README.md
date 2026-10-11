@@ -60,12 +60,18 @@ again. Running it while an earlier run is still publishing is fine: the new run 
 ## Build a TV-show file
 
 `build_pd_show.py` turns a show name into one catalogue JSON file. TVMaze supplies
-show and episode metadata; its alternate titles are searched across Internet Archive
-title, subject, description, series and identifier fields. The builder reads Archive's
-torrent directly. A torrent containing every episode of one season is eligible as a season pack.
-The builder scrapes its HTTP trackers and keeps one pack per season, ranked by seeds, then leechers;
-a healthy multi-season torrent can therefore serve several seasons. Partial and single-episode
-torrents stay as episode sources only when no complete pack exists for that season.
+show and episode metadata. Its canonical and alternate titles are searched across Internet Archive
+title, subject, description, series and identifier fields. Discovery mixes relevance-ranked and
+newest uploads, reserves enough space for qualified aliases such as `The Office US`, and refills
+unused alias space from the canonical-title search. The stable default is 100 combined candidates.
+
+The builder reads Archive's torrent directly. A torrent containing every episode of one season is
+eligible as a season pack. HTTP and UDP trackers provide seed counts; Archive webseed files are
+verified with a lightweight HTTP request. Seeded torrents rank first, followed by verified webseeds,
+then leechers, season coverage and quality. One pack is kept per season, and one healthy multi-season
+torrent can serve several seasons. Partial and single-episode torrents stay as episode sources only
+when no complete pack exists for that season. Every episode's metadata is written even when no source
+was found, so gaps remain visible instead of disappearing from the JSON.
 
 ```powershell
 python build_pd_show.py "The Beverly Hillbillies" --year 1962 --dry-run
@@ -74,6 +80,8 @@ python build_pd_show.py "The Beverly Hillbillies" --year 1962
 
 Use `--verbose` to see which Archive file matched each episode, and `--force` to
 replace an existing JSON file. Without `--force`, a `.pd.json` file is written beside it.
+Use `--max-archive-results 300` for a deliberately deeper diagnostic search; 100 is the tested main
+path because deeper searches were much slower and rarely improved coverage.
 When that existing file describes the same show, its `id` is copied into the generated file so the
 merge replaces the show instead of displaying a second copy.
 
