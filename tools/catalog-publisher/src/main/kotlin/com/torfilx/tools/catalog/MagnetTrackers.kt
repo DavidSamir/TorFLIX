@@ -39,6 +39,7 @@ object MagnetTrackers {
         return entries.map { entry ->
             entry.copy(
                 magnets = entry.magnets.stripped(),
+                packs = entry.packs.stripped(),
                 seasons = entry.seasons.map { season ->
                     season.copy(
                         packs = season.packs.stripped(),

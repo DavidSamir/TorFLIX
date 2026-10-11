@@ -6,6 +6,26 @@ import org.junit.Test
 class MagnetLinkTest {
 
     @Test
+    fun `scheme query keys and urn are case insensitive`() {
+        val magnet = "MAGNET:?XT=URN:BTIH:${HASH.uppercase()}&DN=Season+2"
+        assertThat(MagnetLink.infoHashOf(magnet)).isEqualTo(HASH)
+        assertThat(MagnetLink.displayName(magnet)).isEqualTo("Season 2")
+    }
+
+    @Test
+    fun `encoded exact topics and extra topic types are supported`() {
+        val magnet = "magnet:?xt=urn:btmh:other&xt=urn%3Abtih%3A$HASH&dn=Season%202"
+        assertThat(MagnetLink.infoHashOf(magnet)).isEqualTo(HASH)
+        assertThat(MagnetLink.displayName(magnet)).isEqualTo("Season 2")
+    }
+
+    @Test
+    fun `a broken display name cannot crash magnet parsing`() {
+        assertThat(MagnetLink.infoHashOf("magnet:?xt=urn:btih:$HASH&dn=Bad%ZZ")).isEqualTo(HASH)
+        assertThat(MagnetLink.displayName("magnet:?xt=urn:btih:$HASH&dn=Bad%ZZ")).isNull()
+    }
+
+    @Test
     fun `valid hex magnet yields a lowercase info hash`() {
         val magnet = "magnet:?xt=urn:btih:${HASH.uppercase()}&dn=The+Kid&tr=udp%3A%2F%2Ftracker"
         assertThat(MagnetLink.infoHashOf(magnet)).isEqualTo(HASH)

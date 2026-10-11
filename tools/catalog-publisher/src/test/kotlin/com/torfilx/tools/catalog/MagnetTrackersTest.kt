@@ -49,6 +49,7 @@ class MagnetTrackersTest {
     fun `every magnet in a catalogue is trimmed, films, episodes and packs alike`() {
         val show = TestCatalogues.show().let { show ->
             show.copy(
+                packs = listOf(CatalogMagnetDto(magnet = magnet)),
                 seasons = show.seasons.map { season ->
                     season.copy(
                         packs = listOf(CatalogMagnetDto(magnet = magnet)),
@@ -61,7 +62,7 @@ class MagnetTrackersTest {
 
         val stripped = MagnetTrackers.stripAll(listOf(film, show), keep = 1, preferred = emptyList())
 
-        val all = stripped[0].magnets + stripped[1].seasons.flatMap { s -> s.packs + s.episodes.flatMap { it.magnets } }
+        val all = stripped[0].magnets + stripped[1].packs + stripped[1].seasons.flatMap { s -> s.packs + s.episodes.flatMap { it.magnets } }
         assertThat(all.map { m -> m.magnet.split('&').count { it.startsWith("tr=") } }.toSet()).containsExactly(1)
     }
 }

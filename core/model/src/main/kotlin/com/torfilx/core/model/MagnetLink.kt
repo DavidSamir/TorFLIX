@@ -13,27 +13,27 @@ object MagnetLink {
 
     /** The 40-hex (or base32) info hash, or null when the magnet is malformed. */
     fun infoHashOf(magnet: String): String? {
-        if (!magnet.startsWith("magnet:?", ignoreCase = true)) return null
-        val xt = magnet.removePrefix("magnet:?")
-            .split('&')
-            .firstOrNull { it.startsWith("xt=urn:btih:", ignoreCase = true) }
-            ?: return null
-        val hash = xt.substringAfter("urn:btih:", "").trim()
-        return when {
-            INFO_HASH_HEX.matches(hash) -> hash.lowercase()
-            INFO_HASH_BASE32.matches(hash.uppercase()) -> hash.uppercase()
-            else -> null
+        return values(magnet, "xt").firstNotNullOfOrNull { topic ->
+            if (!topic.startsWith("urn:btih:", ignoreCase = true)) return@firstNotNullOfOrNull null
+            val hash = topic.substring("urn:btih:".length).trim()
+            when {
+                INFO_HASH_HEX.matches(hash) -> hash.lowercase()
+                INFO_HASH_BASE32.matches(hash.uppercase()) -> hash.uppercase()
+                else -> null
+            }
         }
     }
 
     fun isValid(magnet: String): Boolean = infoHashOf(magnet) != null
 
     /** Display name from the `dn` parameter, if present. */
-    fun displayName(magnet: String): String? = magnet
-        .substringAfter("magnet:?", "")
-        .split('&')
-        .firstOrNull { it.startsWith("dn=") }
-        ?.removePrefix("dn=")
-        ?.let { java.net.URLDecoder.decode(it, "UTF-8") }
-        ?.takeIf { it.isNotBlank() }
+    fun displayName(magnet: String): String? = values(magnet, "dn").firstOrNull { it.isNotBlank() }
+
+    private fun values(magnet: String, key: String): List<String> {
+        if (!magnet.startsWith("magnet:?", ignoreCase = true)) return emptyList()
+        return magnet.substring("magnet:?".length).split('&').mapNotNull { parameter ->
+            if (!parameter.substringBefore('=').equals(key, ignoreCase = true)) return@mapNotNull null
+            runCatching { java.net.URLDecoder.decode(parameter.substringAfter('=', ""), "UTF-8") }.getOrNull()
+        }
+    }
 }

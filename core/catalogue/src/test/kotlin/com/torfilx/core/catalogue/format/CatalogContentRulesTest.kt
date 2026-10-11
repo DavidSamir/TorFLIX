@@ -6,6 +6,15 @@ import org.junit.Test
 
 class CatalogContentRulesTest {
 
+    @Test
+    fun `show wide packs are allowed on shows and refused on films`() {
+        val pack = CatalogMagnetDto(magnet = "magnet:?xt=urn:btih:" + "a".repeat(40))
+        val show = TestCatalogues.show(title = "Pack Test", seasons = 2, episodesPerSeason = 2).copy(packs = listOf(pack))
+        assertThat(problems(listOf(show), release = false)).isEmpty()
+        assertThat(problems(listOf(entry("Film", "film").copy(packs = listOf(pack)))))
+            .containsExactly("entry 0 (\"Film\") is a film but has show packs; a show needs \"type\": \"show\"")
+    }
+
     private fun entry(title: String, id: String?) = CatalogEntryDto(id = id, title = title)
 
     private fun problems(entries: List<CatalogEntryDto>, declared: Int = entries.size, release: Boolean = true) =

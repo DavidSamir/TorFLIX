@@ -340,7 +340,8 @@ class LibTorrentEngine @Inject constructor(
             val candidates = (0 until files.numFiles()).map { index ->
                 EpisodeFileMatcher.Candidate(index, files.filePath(index), files.fileSize(index))
             }
-            val fileIndex = chooseVideoFile(candidates, selection) ?: throw TorrentError.NoPlayableFile()
+            val fileIndex = chooseVideoFile(candidates, selection)
+                ?: throw TorrentError.NoPlayableFile(episodeNotIdentified = selection != FileSelection.LargestVideo)
             if (fileIndex != existing.fileIndex) {
                 TorfilxLog.i(TAG, "Switching $infoHash from file ${existing.fileIndex} to ${files.filePath(fileIndex)}")
                 existing.select(selectedFile(files, fileIndex), files.numFiles())
@@ -411,7 +412,8 @@ class LibTorrentEngine @Inject constructor(
         val candidates = (0 until files.numFiles()).map { index ->
             EpisodeFileMatcher.Candidate(index, files.filePath(index), files.fileSize(index))
         }
-        val fileIndex = chooseVideoFile(candidates, selection) ?: throw TorrentError.NoPlayableFile()
+        val fileIndex = chooseVideoFile(candidates, selection)
+            ?: throw TorrentError.NoPlayableFile(episodeNotIdentified = selection != FileSelection.LargestVideo)
         if (selection != FileSelection.LargestVideo) {
             TorfilxLog.i(TAG, "Streaming ${files.filePath(fileIndex)} for $selection")
         }

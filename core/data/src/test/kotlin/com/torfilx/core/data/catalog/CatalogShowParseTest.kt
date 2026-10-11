@@ -17,6 +17,28 @@ import org.junit.Test
  */
 class CatalogShowParseTest {
 
+    @Test
+    fun `a show wide pack is shared by every season with strict season matching and deduplicated`() {
+        val show = parse("""
+            [{"type":"show","title":"Pack Test","packs":[{"magnet":"magnet:?xt=urn:btih:$hashA"}],
+              "seasons":[
+                {"number":1,"packs":[{"magnet":"magnet:?xt=urn:btih:$hashA"}],"episodes":[{"number":1}]},
+                {"number":2,"episodes":[{"number":1},{"number":2}]}
+              ]}]
+        """).single()
+        assertThat(show.seasons).hasSize(2)
+        show.seasons.forEach { season ->
+            season.episodes.forEach { episode ->
+                assertThat(episode.isPlayable).isTrue()
+                val source = show.episodeSources.getValue(episode.id).single()
+                val target = (source.fileSelection as FileSelection.Episode).target
+                assertThat(target.season).isEqualTo(season.number)
+                assertThat(target.episode).isEqualTo(episode.number)
+                assertThat(target.allowUnscopedEpisodeNumbers).isFalse()
+            }
+        }
+    }
+
     private val json = CatalogueJson.content
     private val hashA = "0697bc07ebc5914085c2a3bce646509086bf6265"
     private val hashB = "bb5a1f6d17d3f8e01de20d42fb9860157a24456c"

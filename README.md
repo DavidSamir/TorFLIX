@@ -245,6 +245,21 @@ An episode's name is `"name"`, never `"title"`: the release format counts `"titl
 that nothing was lost, and it counts one per top-level entry. Season `0` is Specials. The full rules
 are in [`docs/CATALOGUE_P2P.md`](docs/CATALOGUE_P2P.md).
 
+For a single-season torrent, put its magnet in that season's `"packs"` list. For a multi-season or
+full-show torrent, put it in a `"packs"` list on the show itself; the app shares that source across
+all listed seasons. Episode-specific `"magnets"`, season packs, and show packs can coexist. Seasons
+and episodes still need catalogue entries; adding a magnet does not discover or create those entries.
+
+Episode selection understands `S01E02`, `1x02`, `Season 1/E02`, `S02/02 - Name`, and
+`Season 2 Episode 3` names, including Windows paths, numbered partial packs, and Specials folders.
+Combined `S01E01E03` files identify episodes 1 and 3; `S01E01-E03` identifies the full range.
+Combined files play from the beginning; separate episode start times require chapter metadata.
+Samples and extras are excluded. Show packs require season evidence for episode-only names.
+Unlabelled collections are not assigned episodes by alphabetical position or file size. An
+episode-specific source can contain one unlabelled video, but conflicting episode labels or
+unmatched multi-video sources are refused and the player can try another source. Archives and
+unrecognizable names require correction; container detection does not guarantee codec support.
+
 Magnets are validated when the file loads: an entry whose `xt=urn:btih:` is not a 40-character hex
 (or 32-character base32) info hash is dropped with a log line rather than failing later in the
 player. Only content that may be freely redistributed belongs here — seeding *is* redistribution.

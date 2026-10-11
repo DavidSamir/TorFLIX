@@ -79,6 +79,8 @@ internal class EntryReader(private val log: MergeLog) {
 
         val seasonsValue = fields["seasons"]
         val magnetsValue = fields["magnets"]
+        val packsValue = fields["packs"]
+        if (!isShow && !isEmptyList(packsValue)) return refuse("is a film but has show packs: if it is a series, add \"type\": \"show\"")
         if (!isShow && !isEmptyList(seasonsValue)) return refuse("is a film but has seasons: if it is a series, add \"type\": \"show\"")
         if (isShow && !isEmptyList(magnetsValue)) {
             log.warning(where, "is a show, so its own \"magnets\" were left out: a show's torrents belong to its episodes, or to a season's \"packs\"")
@@ -86,13 +88,14 @@ internal class EntryReader(private val log: MergeLog) {
 
         val seasons = if (isShow) seasons(seasonsValue, where) else emptyList()
         val magnets = if (isShow) emptyList() else magnets(magnetsValue, "magnet", where)
+        val packs = if (isShow) magnets(packsValue, "show pack", where) else emptyList()
         if (isShow) {
             if (seasons.isEmpty()) return refuse("is a show with no usable season")
             val episodes = seasons.sumOf { it.episodes.size }
             if (episodes > CatalogRelease.MAX_EPISODES_PER_SHOW) {
                 return refuse("has $episodes episodes, more than the ${CatalogRelease.MAX_EPISODES_PER_SHOW} a show may have")
             }
-            reportUnplayableEpisodes(seasons, where)
+            if (packs.isEmpty()) reportUnplayableEpisodes(seasons, where)
         } else if (magnets.isEmpty()) {
             log.warning(where, "has no usable magnet, so it cannot be played")
         }
@@ -109,6 +112,7 @@ internal class EntryReader(private val log: MergeLog) {
             runtimeMinutes = positive(fields["runtimeMinutes"], "runtimeMinutes", where),
             magnets = magnets,
             seasons = seasons,
+            packs = packs,
         )
         return Read(entry, key, where)
     }
@@ -501,7 +505,7 @@ internal class EntryReader(private val log: MergeLog) {
             "text that is exactly \"title\", or ends in a quote followed by title, breaks the release's count of titles"
 
         private val ENTRY_FIELDS = setOf(
-            "id", "type", "title", "year", "image_url", "backdrop_url", "overview", "genres", "runtimeMinutes", "magnets", "seasons",
+            "id", "type", "title", "year", "image_url", "backdrop_url", "overview", "genres", "runtimeMinutes", "magnets", "seasons", "packs",
         )
         private val SEASON_FIELDS = setOf("number", "name", "image_url", "packs", "episodes")
         private val EPISODE_FIELDS = setOf("id", "number", "name", "overview", "runtimeMinutes", "airDate", "image_url", "magnets")

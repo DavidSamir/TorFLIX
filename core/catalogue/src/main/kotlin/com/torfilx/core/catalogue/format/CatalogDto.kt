@@ -41,6 +41,8 @@ data class CatalogEntryDto(
     val magnets: List<CatalogMagnetDto> = emptyList(),
     /** Shows only. */
     val seasons: List<CatalogSeasonDto> = emptyList(),
+    /** Shows only: multi-season or full-show torrents, shared by every listed episode. */
+    val packs: List<CatalogMagnetDto> = emptyList(),
 ) {
     /** True for a show. A film has no type, or `movie`. */
     val isShow: Boolean get() = type?.trim().equals(TYPE_SHOW, ignoreCase = true)

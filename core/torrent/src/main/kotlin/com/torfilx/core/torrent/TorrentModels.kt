@@ -85,7 +85,10 @@ sealed class TorrentError(message: String, cause: Throwable? = null) : Exception
             if (!diagnostics.isNullOrBlank()) append("\n\n").append(diagnostics)
         },
     )
-    class NoPlayableFile : TorrentError("The torrent contains no playable video file")
+    class NoPlayableFile(episodeNotIdentified: Boolean = false) : TorrentError(
+        if (episodeNotIdentified) "The requested episode could not be identified in this torrent. Try another source."
+        else "The torrent contains no playable video file",
+    )
     class EngineUnavailable(cause: Throwable?) :
         TorrentError("The torrent engine could not start on this device", cause)
 }

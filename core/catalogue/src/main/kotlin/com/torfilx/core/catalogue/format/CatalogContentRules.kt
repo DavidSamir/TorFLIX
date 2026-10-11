@@ -43,6 +43,9 @@ object CatalogContentRules {
             val label = "entry $index (\"${entry.title.take(TITLE_PREVIEW)}\")"
             if (entry.title.isBlank()) problems += "entry $index has no title"
             ids.check(entry.id, Location(index, null), label)
+            if (!entry.isShow && entry.packs.isNotEmpty()) {
+                problems += "$label is a film but has show packs; a show needs \"type\": \"show\""
+            }
             when {
                 !entry.hasKnownType -> problems += "entry $index has an unknown type \"${entry.type?.take(TITLE_PREVIEW)}\"; " +
                     "it must be \"${CatalogEntryDto.TYPE_MOVIE}\" or \"${CatalogEntryDto.TYPE_SHOW}\""

@@ -4,7 +4,7 @@ import com.torfilx.core.model.EpisodeFileMatcher
 import com.torfilx.core.model.FileSelection
 
 /** The file extensions the engine treats as video. Anything else in a torrent is never downloaded. */
-internal val VIDEO_EXTENSIONS = listOf(".mp4", ".mkv", ".avi", ".mov", ".m4v", ".webm", ".mpg", ".mpeg")
+internal val VIDEO_EXTENSIONS = listOf(".mp4", ".mkv", ".avi", ".mov", ".m4v", ".webm", ".mpg", ".mpeg", ".ts", ".m2ts", ".mts")
 
 internal fun String.isVideoFile(): Boolean {
     val lower = lowercase()
@@ -18,7 +18,7 @@ internal fun String.isVideoFile(): Boolean {
  *   is the one, which is what this has always done.
  * - [FileSelection.PreferEpisode]: an episode's own torrent. When it turns out to hold several videos
  *   (a catalogue entry pointing at a whole season by mistake) the episode's file is looked for first;
- *   with no match, the largest video is still the answer.
+ *   with no match, only a single unlabelled episode video is accepted.
  * - [FileSelection.Episode]: a season pack. Only the episode's own file will do. With no match there is
  *   nothing to play — the largest file of a pack is simply some other episode.
  *
@@ -35,8 +35,7 @@ internal fun chooseVideoFile(
     val largest = videos.maxByOrNull { it.sizeBytes }?.index
     return when (selection) {
         FileSelection.LargestVideo -> largest
-        is FileSelection.PreferEpisode ->
-            if (videos.size > 1) EpisodeFileMatcher.select(videos, selection.target) ?: largest else largest
+        is FileSelection.PreferEpisode -> EpisodeFileMatcher.selectEpisodeSource(videos, selection.target)
         is FileSelection.Episode -> EpisodeFileMatcher.select(videos, selection.target)
     }
 }

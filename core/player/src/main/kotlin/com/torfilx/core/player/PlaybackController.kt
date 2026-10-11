@@ -1373,7 +1373,7 @@ class PlaybackController @Inject constructor(
         )
 
         is TorrentError.NoPlayableFile -> PlaybackError.Unsupported(
-            "That torrent contains no video file.",
+            message ?: "That torrent contains no playable video file.",
         )
 
         is TorrentError.EngineUnavailable -> PlaybackError.Unsupported(

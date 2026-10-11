@@ -256,7 +256,7 @@ object CatalogPinning {
             newlyPinned = entries.count { it.id == null },
             unplayable = pinned.count { entry ->
                 if (entry.isShow) {
-                    entry.seasons.none { season -> season.packs.let(playable) || season.episodes.any { playable(it.magnets) } }
+                    !playable(entry.packs) && entry.seasons.none { season -> season.packs.let(playable) || season.episodes.any { playable(it.magnets) } }
                 } else {
                     !playable(entry.magnets)
                 }
@@ -265,7 +265,7 @@ object CatalogPinning {
             episodes = episodesAfter.size,
             episodesPinned = episodesBefore.count { it.id == null },
             unplayableEpisodes = pinned.filter { it.isShow }.sumOf { show ->
-                show.seasons.sumOf { season -> if (playable(season.packs)) 0 else season.episodes.count { !playable(it.magnets) } }
+                if (playable(show.packs)) 0 else show.seasons.sumOf { season -> if (playable(season.packs)) 0 else season.episodes.count { !playable(it.magnets) } }
             },
         )
     }

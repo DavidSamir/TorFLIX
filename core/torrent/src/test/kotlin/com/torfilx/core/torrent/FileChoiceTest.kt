@@ -44,15 +44,22 @@ class FileChoiceTest {
     }
 
     @Test
-    fun `an episode's own torrent that matches nothing still plays its largest video, as before`() {
+    fun `an episode's own torrent that matches nothing never guesses the largest pack file`() {
         val torrent = files("A.mkv" to gb, "B.mkv" to 2 * gb)
-        assertThat(chooseVideoFile(torrent, FileSelection.PreferEpisode(Target(4, 9, 8, 20)))).isEqualTo(1)
+        assertThat(chooseVideoFile(torrent, FileSelection.PreferEpisode(Target(4, 9, 8, 20)))).isNull()
     }
 
     @Test
-    fun `an episode's own single-video torrent streams that video whatever its name says`() {
+    fun `an episode's own single-video torrent refuses a contradictory episode code`() {
         val single = files("Show.S01E07.mkv" to gb, "Show.S01E07.srt" to 1_000)
+        assertThat(chooseVideoFile(single, FileSelection.PreferEpisode(Target(1, 3, 2, 10)))).isNull()
+    }
+
+    @Test
+    fun `an unlabelled single episode remains playable after named extras are removed`() {
+        val single = files("Title.mkv" to gb, "Sample/Sample.mkv" to gb, "Extras/Interview.mkv" to gb)
         assertThat(chooseVideoFile(single, FileSelection.PreferEpisode(Target(1, 3, 2, 10)))).isEqualTo(0)
+        assertThat(chooseVideoFile(single, FileSelection.Episode(Target(1, 3, 2, 10)))).isNull()
     }
 
     @Test
@@ -70,6 +77,9 @@ class FileChoiceTest {
     fun `video extensions are recognised whatever their case`() {
         assertThat("FILM.MKV".isVideoFile()).isTrue()
         assertThat("clip.m4v".isVideoFile()).isTrue()
+        assertThat("episode.TS".isVideoFile()).isTrue()
+        assertThat("episode.m2ts".isVideoFile()).isTrue()
+        assertThat("episode.mts".isVideoFile()).isTrue()
         assertThat("notes.txt".isVideoFile()).isFalse()
     }
 }

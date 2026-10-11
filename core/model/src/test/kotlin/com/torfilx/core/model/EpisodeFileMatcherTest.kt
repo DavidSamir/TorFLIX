@@ -52,6 +52,7 @@ class EpisodeFileMatcherTest {
     @Test
     fun `a quality tag after a dash is not read as an episode range`() {
         val pack = files("Show.S01E03-720p.mkv" to gb, "Show.S01E05.mkv" to gb)
+        assertThat(EpisodeFileMatcher.select(files("Show.S01E03-1080.mkv" to gb), target(1, 50))).isNull()
         assertThat(EpisodeFileMatcher.select(pack, target(1, 5))).isEqualTo(1)
         assertThat(EpisodeFileMatcher.select(pack, target(1, 3))).isEqualTo(0)
     }
@@ -93,21 +94,131 @@ class EpisodeFileMatcherTest {
     }
 
     @Test
-    fun `files named only by position are matched by natural order when the counts agree`() {
+    fun `numbered files use their numbers rather than their positions even when counts agree`() {
         val pack = files(
             "Show/Part 10.mkv" to gb,
             "Show/Part 2.mkv" to gb,
             "Show/Part 1.mkv" to gb,
         )
-        // Natural order is Part 1, Part 2, Part 10 — not the lexical Part 1, Part 10, Part 2.
         assertThat(EpisodeFileMatcher.select(pack, target(1, 2, ordinal = 1, count = 3))).isEqualTo(1)
-        assertThat(EpisodeFileMatcher.select(pack, target(1, 3, ordinal = 2, count = 3))).isEqualTo(0)
+        assertThat(EpisodeFileMatcher.select(pack, target(1, 3, ordinal = 2, count = 3))).isNull()
+        assertThat(EpisodeFileMatcher.select(pack, target(1, 10))).isEqualTo(0)
     }
 
     @Test
-    fun `files named only by position are refused when the counts disagree`() {
+    fun `a partial numbered pack still plays the episodes it actually contains`() {
         val pack = files("Show/Part 1.mkv" to gb, "Show/Part 2.mkv" to gb)
-        assertThat(EpisodeFileMatcher.select(pack, target(1, 2, ordinal = 1, count = 3))).isNull()
+        assertThat(EpisodeFileMatcher.select(pack, target(1, 2, ordinal = 1, count = 3))).isEqualTo(1)
+        assertThat(EpisodeFileMatcher.select(pack, target(1, 3, ordinal = 2, count = 3))).isNull()
+    }
+
+    @Test
+    fun `full show folders scope repeated episode numbers to their own seasons`() {
+        val pack = files(
+            "Arcane (2021)/Season 1/E01 - Pilot.mkv" to gb,
+            "Arcane (2021)/Season 2/E01 - Return.mkv" to gb,
+            "Arcane (2021)/Season 2/E02 - Next.mkv" to gb,
+        )
+        assertThat(EpisodeFileMatcher.select(pack, target(1, 1))).isEqualTo(0)
+        assertThat(EpisodeFileMatcher.select(pack, target(2, 1))).isEqualTo(1)
+        assertThat(EpisodeFileMatcher.select(pack, target(2, 2))).isEqualTo(2)
+        assertThat(EpisodeFileMatcher.select(pack, target(3, 1))).isNull()
+    }
+
+    @Test
+    fun `season folders work with windows paths bare numbers and specials`() {
+        val pack = files(
+            "Show\\S01\\01.mkv" to gb,
+            "Show\\S02\\02 - Title.mkv" to gb,
+            "Show\\Specials\\01.mkv" to 5 * mb,
+        )
+        assertThat(EpisodeFileMatcher.select(pack, target(1, 1))).isEqualTo(0)
+        assertThat(EpisodeFileMatcher.select(pack, target(2, 2))).isEqualTo(1)
+        assertThat(EpisodeFileMatcher.select(pack, target(0, 1))).isEqualTo(2)
+        assertThat(EpisodeFileMatcher.select(pack, target(1, 2))).isNull()
+    }
+
+    @Test
+    fun `word forms and delimited episode numbers work without interpreting release years`() {
+        val pack = files(
+            "Arcane Season 2 Episode 1 1080p.mkv" to gb,
+            "Season 2/Arcane - 02 - Title.mkv" to gb,
+            "Season 2/[03] Title.mkv" to gb,
+            "Arcane 2021 1080p.mkv" to gb,
+        )
+        assertThat(EpisodeFileMatcher.select(pack, target(2, 1))).isEqualTo(0)
+        assertThat(EpisodeFileMatcher.select(pack, target(1, 1))).isNull()
+        assertThat(EpisodeFileMatcher.select(pack, target(2, 2))).isEqualTo(1)
+        assertThat(EpisodeFileMatcher.select(pack, target(2, 3))).isEqualTo(2)
+        assertThat(EpisodeFileMatcher.select(pack, target(2, 108))).isNull()
+    }
+
+    @Test
+    fun `file codes override folders and folder episode codes never label all their children`() {
+        val pack = files("Season 1/Show.S02E03.mkv" to gb, "Show.S01E01/Unknown.mkv" to gb)
+        assertThat(EpisodeFileMatcher.select(pack, target(2, 3))).isEqualTo(0)
+        assertThat(EpisodeFileMatcher.select(pack, target(1, 1))).isNull()
+    }
+
+    @Test
+    fun `an unscoped episode number is ambiguous in a multi season listing`() {
+        val pack = files("Season 1/E01.mkv" to gb, "Season 2/E01.mkv" to gb, "E02.mkv" to gb)
+        assertThat(EpisodeFileMatcher.select(pack, target(1, 2))).isNull()
+        assertThat(EpisodeFileMatcher.select(pack, target(2, 2))).isNull()
+    }
+
+    @Test
+    fun `episode chains name individual episodes and ranges name every contained episode`() {
+        val chain = files("Show.S01E01E03E05.mkv" to gb)
+        for (episode in listOf(1, 3, 5)) {
+            assertThat(EpisodeFileMatcher.select(chain, target(1, episode))).isEqualTo(0)
+        }
+        assertThat(EpisodeFileMatcher.select(chain, target(1, 2))).isNull()
+        val range = files("Show.S01E01-E03.mkv" to gb)
+        for (episode in 1..3) assertThat(EpisodeFileMatcher.select(range, target(1, episode))).isEqualTo(0)
+        assertThat(EpisodeFileMatcher.select(files("Season 1/E01-E03.mkv" to gb), target(1, 2))).isEqualTo(0)
+        assertThat(EpisodeFileMatcher.select(files("Show.1x01-03.mkv" to gb), target(1, 2))).isEqualTo(0)
+    }
+
+    @Test
+    fun `extras folders never participate and short legitimate episodes are retained`() {
+        val pack = files(
+            "Show.S01E01.mkv" to gb,
+            "Show.S01E02.mkv" to 5 * mb,
+            "Extras/Show.S01E03.mkv" to 2 * gb,
+            "Sample/Show.S01E04.mkv" to gb,
+        )
+        assertThat(EpisodeFileMatcher.select(pack, target(1, 2))).isEqualTo(1)
+        assertThat(EpisodeFileMatcher.select(pack, target(1, 3))).isNull()
+        assertThat(EpisodeFileMatcher.select(pack, target(1, 4))).isNull()
+        assertThat(EpisodeFileMatcher.select(files("Trailer Park Boys.S01E01.mkv" to gb), target(1, 1))).isEqualTo(0)
+    }
+
+    @Test
+    fun `an unlabelled collection is not ordered by guesswork`() {
+        val pack = files("Pilot.mkv" to gb, "Finale.mkv" to gb)
+        assertThat(EpisodeFileMatcher.select(pack, target(1, 1, count = 2))).isNull()
+    }
+
+    @Test
+    fun `show wide packs require season evidence for episode only names`() {
+        val pack = files("E01.mkv" to gb, "E02.mkv" to gb)
+        assertThat(EpisodeFileMatcher.select(pack, target(1, 1).copy(allowUnscopedEpisodeNumbers = false))).isNull()
+        val scoped = files("Season 2/E01.mkv" to gb)
+        assertThat(EpisodeFileMatcher.select(scoped, target(2, 1).copy(allowUnscopedEpisodeNumbers = false))).isEqualTo(0)
+    }
+
+    @Test
+    fun `arcane style separate season releases match codes and reject the other season`() {
+        val seasonOne = files(
+            "Arcane (2021) Season 1 S01 (1080p NF WEB-DL x265 HEVC 10bit EAC3)/Arcane.S01E01.mkv" to gb,
+            "Arcane (2021) Season 1 S01 (1080p NF WEB-DL x265 HEVC 10bit EAC3)/Arcane.S01E02.mkv" to gb,
+        )
+        val seasonTwo = files("Arcane.S02.COMPLETE.REPACK.1080p.NF.WEB-DL.DDP5.1.Atmos.H.264-FL/Arcane.S02E01.mkv" to gb)
+        assertThat(EpisodeFileMatcher.select(seasonOne, target(1, 2))).isEqualTo(1)
+        assertThat(EpisodeFileMatcher.select(seasonOne, target(2, 1))).isNull()
+        assertThat(EpisodeFileMatcher.select(seasonTwo, target(2, 1))).isEqualTo(0)
+        assertThat(EpisodeFileMatcher.select(seasonTwo, target(1, 1))).isNull()
     }
 
     @Test

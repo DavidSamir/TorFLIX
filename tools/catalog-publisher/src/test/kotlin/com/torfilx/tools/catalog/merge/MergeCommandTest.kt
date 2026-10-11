@@ -30,6 +30,19 @@ import java.util.zip.GZIPOutputStream
 /** `merge` end to end, through the same entry point the publishing scripts use. */
 class MergeCommandTest {
 
+    @Test
+    fun `merge preserves show wide packs and does not mark their episodes unplayable`() {
+        File(add, "show.json").writeText("""
+            [{"type":"show","title":"Pack Test","year":"2021",
+              "packs":[{"magnet":"${TestCatalogues.magnet(1)}"}],
+              "seasons":[{"number":1,"episodes":[{"number":1}]},
+                         {"number":2,"episodes":[{"number":1}]}]}]
+        """)
+        assertThat(merge()).isEqualTo(0)
+        assertThat(merged().single().packs.map { it.magnet }).containsExactly(TestCatalogues.magnet(1))
+        assertThat(output.toString()).doesNotContain("no usable magnet")
+    }
+
     @get:Rule
     val tmp = TemporaryFolder()
 

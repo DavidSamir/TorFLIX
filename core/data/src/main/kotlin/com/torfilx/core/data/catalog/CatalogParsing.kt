@@ -273,9 +273,13 @@ private fun mapShow(entry: CatalogEntryDto, title: String, index: Int, usedIds: 
         }
     }
 
+    val showPacks = torrentSources("$title (show pack)", entry.packs)
+    bySeason.values.forEach { builder ->
+        builder.packs += showPacks
+    }
     val seasons = bySeason.values
         .filter { it.episodes.isNotEmpty() }
-        .map { it.build(episodeSources) }
+        .map { it.build(episodeSources, showPacks.map { pack -> pack.id }.toSet()) }
         // Regular seasons ascending, Specials last.
         .sortedWith(compareBy<Season> { it.isSpecials }.thenBy { it.number })
     val episodeCount = seasons.sumOf { it.episodes.size }
@@ -320,7 +324,7 @@ private class SeasonBuilder(val number: Int, val name: String?, val image: Strin
      *
      * @param sources every episode's sources, by id; the pack sources are added to it here.
      */
-    fun build(sources: MutableMap<String, List<MediaSource>>): Season {
+    fun build(sources: MutableMap<String, List<MediaSource>>, showPackIds: Set<String> = emptySet()): Season {
         val ordered = episodes.sortedBy { it.number }
         return Season(
             number = number,
@@ -328,11 +332,13 @@ private class SeasonBuilder(val number: Int, val name: String?, val image: Strin
             image = image?.takeIf { it.isNotBlank() },
             episodes = ordered.mapIndexed { ordinal, episode ->
                 val target = EpisodeFileMatcher.Target(number, episode.number, ordinal, ordered.size)
-                val fromPacks = packs.map { pack ->
+                val fromPacks = packs.distinctBy { it.id }.map { pack ->
                     pack.copy(
                         id = "pack-" + pack.id.removePrefix("torrent-"),
                         label = "${pack.label} (season)",
-                        fileSelection = FileSelection.Episode(target),
+                        fileSelection = FileSelection.Episode(
+                            target.copy(allowUnscopedEpisodeNumbers = pack.id !in showPackIds),
+                        ),
                     )
                 }
                 val all = sources[episode.id].orEmpty() + fromPacks
