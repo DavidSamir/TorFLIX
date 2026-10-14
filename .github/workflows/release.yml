@@ -245,6 +245,16 @@ jobs:
               echo "Signed with the existing release key: install over 1.0.0 to keep your app data."
               echo ""
             fi
+            if [ "$GITHUB_REF_NAME" = "v1.0.3" ]; then
+              echo "**Built-in catalogue 9, including Ted seasons 1 and 2**"
+              echo ""
+              echo "The latest published catalogue is included in the APK: 2,016 titles (2,000 films and 16 shows), with 2,271 episodes. Ted includes all 7 episodes of season 1 and all 8 episodes of season 2, using the supplied 1080p season packs."
+              echo ""
+              echo "The catalogue is available immediately after installation, without downloading catalogue 9 over the peer network. Video playback still needs reachable torrent peers. This release does not change peer connectivity."
+              echo ""
+              echo "Install over an existing 1.0.x release to keep watch progress and My List. Signed with the existing release key."
+              echo ""
+            fi
             echo "**Sideload onto a Fire TV**"
             echo ""
             echo "In the Downloader app, enter:"

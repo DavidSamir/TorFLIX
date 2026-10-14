@@ -66,7 +66,7 @@ class CatalogFullLoadTest {
         // with no valid magnet, or a show with an episode that has none, is a dead card on a fresh
         // television.
         val items = parseCatalog(catalogFile.readText(), json)
-        // Catalogue 7 includes these metadata-only films. Preserve the published bytes and ids,
+        // Catalogue 9 includes these metadata-only films. Preserve the published bytes and ids,
         // while still failing on any additional title that unexpectedly loses its sources.
         val knownUnavailable = setOf(
             "catalog-baby-driver-2017", "catalog-mile-22-2018", "catalog-megamind-2010",
@@ -77,14 +77,7 @@ class CatalogFullLoadTest {
         )
         val unavailable = items.filter { it.seasons.isEmpty() && it.sources.isEmpty() }.map { it.item.id }.toSet()
         assertThat(unavailable).containsExactlyElementsIn(knownUnavailable)
-        val metadataOnlyShows = mapOf(
-            "catalog-brooklyn-nine-nine" to 153, "catalog-community" to 110,
-            "catalog-parks-and-recreation" to 125, "catalog-arrested-development" to 84,
-            "catalog-silicon-valley" to 53, "catalog-ted-lasso" to 44,
-            "catalog-schitts-creek" to 79, "catalog-malcolm-in-the-middle" to 151,
-            "catalog-better-call-saul" to 63, "catalog-fargo" to 51, "catalog-barry" to 32,
-            "catalog-dexter" to 96, "catalog-the-sopranos" to 86,
-        )
+        val metadataOnlyShows = emptyMap<String, Int>()
         val unavailableEpisodes = items.mapNotNull { entry ->
             entry.episodeSources.values.count { it.isEmpty() }.takeIf { it > 0 }?.let { entry.item.id to it }
         }.toMap()

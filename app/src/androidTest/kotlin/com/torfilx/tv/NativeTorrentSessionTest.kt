@@ -34,15 +34,18 @@ class NativeTorrentSessionTest {
     @Inject lateinit var engine: LibTorrentEngine
     @Inject lateinit var catalog: Catalog
 
-    @Test fun bundledCatalogueSevenLoadsFully() {
+    @Test fun bundledCatalogueNineLoadsFully() {
         hilt.inject()
         val snapshot = catalog.snapshot()
         assertEquals(CatalogueOrigin.BUNDLED, snapshot.info.origin)
-        assertEquals(7L, snapshot.info.version)
-        assertEquals(2028, snapshot.items.size)
-        assertEquals(3309, snapshot.items.sumOf { entry -> entry.seasons.sumOf { it.episodes.size } })
+        assertEquals(9L, snapshot.info.version)
+        assertEquals(2016, snapshot.items.size)
+        assertEquals(2271, snapshot.items.sumOf { entry -> entry.seasons.sumOf { it.episodes.size } })
         assertFalse(snapshot.isIncomplete)
-        assertNotNull(snapshot.playable("show-the-beverly-hillbillies-1962-s01e01"))
+        val ted = snapshot.items.single { it.item.id == "show-ted-2024" }
+        assertEquals(listOf(7, 8), ted.seasons.map { it.episodes.size })
+        assertTrue(snapshot.playable("show-ted-2024-s01e01")!!.sources.isNotEmpty())
+        assertTrue(snapshot.playable("show-ted-2024-s02e08")!!.sources.isNotEmpty())
     }
 
     @Test fun catalogueTransfersBetweenTwoNativeSessions() = runBlocking {

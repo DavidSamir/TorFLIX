@@ -1,4 +1,4 @@
-"""Release gate: both ARM engines, catalogue 7, and 16 KiB modern ELF alignment."""
+"""Release gate: both ARM engines, catalogue 9, and 16 KiB modern ELF alignment."""
 from pathlib import Path
 import hashlib
 import json
@@ -50,14 +50,19 @@ def verify(apk: Path) -> None:
                     assert header[-1] >= 16384, f"{modern} has a load segment smaller than 16 KiB alignment"
         catalog = archive.read("assets/catalog.json")
         manifest = json.loads(archive.read("assets/catalog-manifest.json"))
-        assert manifest["catalogVersion"] == 7
-        assert manifest["sha256"] == "b8c39fdef690bc2ab5f0735f1ec0f29757defa69c6dedcfb4d0fcc240e7e367e"
+        assert manifest["catalogVersion"] == 9
+        assert manifest["sha256"] == "bffbd5ebe39cfacc6ba0e2c986a3455e0bcacbc462a0944818f85feb845c06a8"
         assert manifest["sha256"] == hashlib.sha256(catalog).hexdigest()
         assert manifest["jsonBytes"] == len(catalog)
         entries = json.loads(catalog)
-        assert len(entries) == manifest["titleCount"] == 2028
-        assert sum(len(s["episodes"]) for e in entries for s in e.get("seasons", [])) == 3309
-    print("APK verified: legacy + modern ARM libraries, 16 KiB ELF alignment, catalogue 7 (2028 titles / 3309 episodes)")
+        assert len(entries) == manifest["titleCount"] == 2016
+        assert sum(len(s["episodes"]) for e in entries for s in e.get("seasons", [])) == 2271
+        ted = next(e for e in entries if e["id"] == "show-ted-2024")
+        assert [(s["number"], len(s["episodes"])) for s in ted["seasons"]] == [(1, 7), (2, 8)]
+        expected_hashes = {1: "805F156D69862041049BBBBF1B984AE388B5D33B", 2: "B01B9B6C4F7FE497B78ABC7E2C71822668720CD0"}
+        for season in ted["seasons"]:
+            assert any(expected_hashes[season["number"]] in pack["magnet"] for pack in season["packs"])
+    print("APK verified: legacy + modern ARM libraries, 16 KiB ELF alignment, catalogue 9 (2016 titles / 2271 episodes), Ted seasons 1 and 2")
 
 
 if __name__ == "__main__":

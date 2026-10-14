@@ -39,9 +39,9 @@ class BundledCatalogueReleaseTest {
         val manifest = CatalogueJson.manifest.decodeFromString(BundledCatalogManifest.serializer(), manifestFile.readText())
 
         assertThat(manifest.schemaVersion).isEqualTo(CatalogRelease.SCHEMA_VERSION)
-        assertThat(manifest.catalogVersion).isEqualTo(7L)
-        assertThat(manifest.titleCount).isEqualTo(2028)
-        assertThat(manifest.sha256).isEqualTo("b8c39fdef690bc2ab5f0735f1ec0f29757defa69c6dedcfb4d0fcc240e7e367e")
+        assertThat(manifest.catalogVersion).isEqualTo(9L)
+        assertThat(manifest.titleCount).isEqualTo(2016)
+        assertThat(manifest.sha256).isEqualTo("bffbd5ebe39cfacc6ba0e2c986a3455e0bcacbc462a0944818f85feb845c06a8")
         assertWithMessage("catalog.json changed without rebuilding catalog-manifest.json")
             .that(manifest.sha256).isEqualTo(Sha256.hex(bytes))
         assertThat(manifest.jsonBytes).isEqualTo(bytes.size.toLong())
@@ -61,14 +61,14 @@ class BundledCatalogueReleaseTest {
     }
 
     @Test
-    fun `catalogue seven retains ids from the previous built-in catalogue`() {
+    fun `catalogue nine retains ids for returning titles`() {
         val entries = entries()
         val ids = entries.mapNotNull { it.id } + entries.flatMap { entry ->
             entry.seasons.flatMap { season -> season.episodes.mapNotNull { it.id } }
         }
         assertThat(ids).containsAtLeastElementsIn(
-            listOf("show-the-beverly-hillbillies-1962") + (1..4).map {
-                "show-the-beverly-hillbillies-1962-s01e${it.toString().padStart(2, '0')}"
+            listOf("catalog-the-office") + (1..6).map {
+                "catalog-the-office-s01e${it.toString().padStart(2, '0')}"
             },
         )
     }
